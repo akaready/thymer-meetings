@@ -5072,7 +5072,8 @@ ${text}`;
         }, "Add selected")
       )
     );
-    overlayEl = h("div", { class: `${rootClass}-confirm-overlay` }, dialog);
+    overlayEl = /** @type {HTMLElement} */
+    h("div", { class: `${rootClass}-confirm-overlay` }, dialog);
     overlayEl.addEventListener("mousedown", (event) => {
       if (event.target === overlayEl) {
         closeParticipantConfirmDialog();
@@ -5089,7 +5090,10 @@ ${text}`;
       options.onSkip?.();
     }, "detachKey");
     window.addEventListener("keydown", detachKey, true);
-    const first = overlayEl.querySelector('input[type="text"]');
+    const first = (
+      /** @type {HTMLInputElement|null} */
+      overlayEl.querySelector('input[type="text"]')
+    );
     if (first && typeof first.focus === "function") first.focus();
   }
   __name(openParticipantConfirmDialog, "openParticipantConfirmDialog");
@@ -5415,7 +5419,7 @@ ${text}`;
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "1.23.9";
+  var PLUGIN_VERSION = "1.23.10";
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
     "append-only-realtime",

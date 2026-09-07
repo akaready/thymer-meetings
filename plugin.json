@@ -131,7 +131,7 @@
 		"views": false,
 		"sidebar": true
 	},
-	"version": "1.23.9",
+	"version": "1.23.10",
 	"__source_repo": "https://github.com/akaready/thymer-recall-ai",
 	"__source_files": {
 		"branch": "main",
