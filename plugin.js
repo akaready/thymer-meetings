@@ -5419,7 +5419,7 @@ ${text}`;
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "1.23.10";
+  var PLUGIN_VERSION = "1.23.11";
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
     "append-only-realtime",
@@ -5534,8 +5534,14 @@ ${text}`;
   var SECRET_KEYS = Object.freeze([...API_KEY_FIELDS]);
   function normalizePrefs(raw) {
     const src = raw && typeof raw === "object" ? raw : {};
-    const str = /* @__PURE__ */ __name((key) => typeof src[key] === "string" ? src[key] : DEFAULT_SETTINGS[key], "str");
-    const bool = /* @__PURE__ */ __name((key) => typeof src[key] === "boolean" ? src[key] : DEFAULT_SETTINGS[key], "bool");
+    const str = /* @__PURE__ */ __name((key) => typeof src[key] === "string" ? src[key] : DEFAULT_SETTINGS[
+      /** @type {keyof typeof DEFAULT_SETTINGS} */
+      key
+    ], "str");
+    const bool = /* @__PURE__ */ __name((key) => typeof src[key] === "boolean" ? src[key] : DEFAULT_SETTINGS[
+      /** @type {keyof typeof DEFAULT_SETTINGS} */
+      key
+    ], "bool");
     return {
       version: 1,
       recallRegion: str("recallRegion"),
@@ -5648,7 +5654,13 @@ ${text}`;
   function statusLabel(raw) {
     const normalized = String(raw || "").toLowerCase().replace(/^bot\./, "").trim();
     if (!normalized) return "";
-    if (STATUS_LABELS[normalized]) return STATUS_LABELS[normalized];
+    if (STATUS_LABELS[
+      /** @type {keyof typeof STATUS_LABELS} */
+      normalized
+    ]) return STATUS_LABELS[
+      /** @type {keyof typeof STATUS_LABELS} */
+      normalized
+    ];
     return normalized.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
   __name(statusLabel, "statusLabel");
@@ -5738,7 +5750,8 @@ ${text}`;
         this._prefs = this._settingsStore.load().settings;
         this._recomputeSettings();
       });
-      this._safe("promote api keys", () => void this._configReady.then(() => this._promoteLocalKeysToSlot()));
+      this._safe("promote api keys", () => void /** @type {Promise<any>} */
+      this._configReady.then(() => this._promoteLocalKeysToSlot()));
       this._safe("inject css", () => {
         this.ui.injectCSS(PANEL_CSS);
         this.ui.injectCSS(this._css());
@@ -5888,7 +5901,11 @@ ${text}`;
             return this._toast("Still working", "The meeting is over and the transcript is being processed. Nothing to do.");
           }
           if (kind === "done" || kind === "repair") return void this._confirmRepairMeeting(record);
-          void this._startBot(record, { immediate: true });
+          void this._startBot(
+            /** @type {any} */
+            record,
+            { immediate: true }
+          );
         }, "onClick")
       });
     }
@@ -5912,7 +5929,11 @@ ${text}`;
         }
       }
     }
-    /** @returns {HTMLElement|null} null = let Thymer render the property normally. */
+    /**
+     * @param {any} record
+     * @param {any} view
+     * @returns {HTMLElement|null} null = let Thymer render the property normally.
+     */
     _renderStatusCell(record, view) {
       if (!record) return null;
       if (!view || String(view.type || "").toLowerCase() !== "table") return null;
@@ -5933,6 +5954,12 @@ ${text}`;
      * injection so both affordances behave identically. mousedown/click are stopped so a click sends
      * the bot instead of opening the row / entering the field.
      */
+    /**
+     * @param {any} record
+     * @param {string} icon
+     * @param {string} label
+     * @param {any} opts
+     */
     _sendButton(record, icon, label, opts) {
       const btn = this.ui.createButton({ icon, label, onClick: /* @__PURE__ */ __name(() => void this._startBot(record, opts), "onClick") });
       btn.classList.add(`${ROOT_CLASS}__cell-button`);
@@ -5945,6 +5972,10 @@ ${text}`;
      * click can't double-book) AND it is actually a meeting (has a URL, so a mixed collection grows no
      * dead buttons). A schedulable meeting also gets an immediate "Join now" so a future Date never
      * traps you. Join Now always means now. Returns true if anything was appended.
+     */
+    /**
+     * @param {any} container
+     * @param {any} record
      */
     _appendSendButtons(container, record, state = this._recordVisualState(record)) {
       const sendable = (state.kind === "idle" || state.kind === "schedulable") && !!this._meetingUrl(record);
@@ -6047,6 +6078,7 @@ ${text}`;
         if (this._workspaceCollectionsPromise === task) this._workspaceCollectionsPromise = null;
       }
     }
+    /** @param {string} guid */
     _collectionByGuid(guid) {
       return (this._workspaceCollections || []).find((collection) => {
         try {
@@ -6078,14 +6110,17 @@ ${text}`;
     _registerEvents() {
       const on = this.events && this.events.on ? this.events.on.bind(this.events) : null;
       if (!on) return;
+      /** @type {string[]} */
       this._handlerIds.push(on("panel.navigated", () => {
         this._attachEditorObserver();
         this._updateNavButtonForActiveRecord();
       }));
+      /** @type {string[]} */
       this._handlerIds.push(on("panel.focused", () => {
         this._attachEditorObserver();
         this._updateNavButtonForActiveRecord();
       }));
+      /** @type {string[]} */
       this._handlerIds.push(on("record.created", (ev) => {
         this._scheduleRecordRefresh();
         const selfGuid = this._selfGuid();
@@ -6099,16 +6134,20 @@ ${text}`;
         const rec = ev && typeof ev.getRecord === "function" ? ev.getRecord() : null;
         if (!collGuid && rec) collGuid = recordCollectionGuid(rec);
         if (!collGuid || collGuid !== selfGuid) return;
-        if (rec && rec.guid) this._recordsByGuid.set(rec.guid, rec);
+        if (rec && rec.guid) /** @type {Map<string, any>} */
+        this._recordsByGuid.set(rec.guid, rec);
         if (rec) void this._ensureMeetingSkeleton(rec);
       }));
+      /** @type {any[]} */
       this._handlerIds.push(on("record.updated", (ev) => {
         this._scheduleRecordRefresh();
         this._updateNavButtonForActiveRecord();
         const rec = ev && typeof ev.getRecord === "function" ? ev.getRecord() : ev;
         if (rec && this._isOurRecord(rec)) void this._handleMeetingDateUpdate(rec);
       }));
+      /** @type {any[]} */
       this._handlerIds.push(on("record.moved", () => this._scheduleRecordRefresh()));
+      /** @type {any[]} */
       this._handlerIds.push(on("reload", () => {
         this._scheduleRecordRefresh();
         this._attachEditorObserver();
@@ -6186,7 +6225,11 @@ ${text}`;
     _secretsStorageKey() {
       let workspace = "";
       try {
-        workspace = (this.getWorkspaceGuid ? this.getWorkspaceGuid() : "") || "";
+        workspace = /** @type {any} */
+        (this.getWorkspaceGuid ? (
+          /** @type {any} */
+          this.getWorkspaceGuid()
+        ) : "") || "";
       } catch {
       }
       let collection = "";
@@ -6208,6 +6251,7 @@ ${text}`;
      * Patch-write the device-local entry. Always a PATCH, never a dump of
      * `this._secrets` — the in-memory view may hold slot-sourced API keys,
      * and an image edit must not resurrect them into the local entry.
+     * @param {any} patch
      */
     _writeLocalSecretsEntry(patch) {
       try {
@@ -6237,7 +6281,10 @@ ${text}`;
     _readSecretsSlot(userGuid = this._currentUserGuid()) {
       if (!userGuid) return null;
       try {
-        const conf = this.getConfiguration ? this.getConfiguration() : {};
+        const conf = (
+          /** @type {any} */
+          this.getConfiguration ? this.getConfiguration() : {}
+        );
         const map = conf && conf.custom ? conf.custom[SECRETS_CONFIG_KEY] : null;
         const slot = map && typeof map === "object" ? map[userGuid] : null;
         return slot && typeof slot === "object" ? normalizeKeySlot(slot) : null;
@@ -6268,6 +6315,8 @@ ${text}`;
      * mounted panel heals onto the fresh instance, same as after a ↑ push).
      * Same identity guard as the shared store. Resolves false when nothing was
      * persisted (caller falls back to the device-local entry).
+     * @param {string} userGuid
+     * @param {any} keys
      */
     async _writeSecretsSlot(userGuid, keys) {
       if (!userGuid) return false;
@@ -6335,7 +6384,11 @@ ${text}`;
       try {
         let workspace = "";
         try {
-          workspace = (this.getWorkspaceGuid ? this.getWorkspaceGuid() : "") || "";
+          workspace = /** @type {any} */
+          (this.getWorkspaceGuid ? (
+            /** @type {any} */
+            this.getWorkspaceGuid()
+          ) : "") || "";
         } catch {
         }
         let collection = "";
@@ -6365,7 +6418,11 @@ ${text}`;
     _migrateLegacyLocalSettings() {
       let workspace = "";
       try {
-        workspace = (this.getWorkspaceGuid ? this.getWorkspaceGuid() : "") || "";
+        workspace = /** @type {any} */
+        (this.getWorkspaceGuid ? (
+          /** @type {any} */
+          this.getWorkspaceGuid()
+        ) : "") || "";
       } catch {
       }
       let collection = "";
@@ -6407,6 +6464,11 @@ ${text}`;
       } catch {
       }
     }
+    /**
+     * @param {string} key
+     * @param {any} value
+     * @param {{rerender?: boolean}} [options]
+     */
     _updateSetting(key, value, { rerender = false } = {}) {
       if (SECRET_KEYS.includes(key)) {
         this._secrets = normalizeSecrets({ ...this._secrets, [key]: value });
@@ -6436,6 +6498,7 @@ ${text}`;
       });
       const on = this.events && this.events.on ? this.events.on.bind(this.events) : null;
       if (!on) return;
+      /** @type {any[]} */
       this._handlerIds.push(on("collection.updated", (event) => {
         try {
           if (event && event.source && event.source.isLocal) return;
@@ -6466,6 +6529,7 @@ ${text}`;
      * Store-lifecycle adopt path (fires only for 'global-plugin.updated' —
      * dead for CollectionPlugins today, kept for parity): adopt pushed prefs
      * AND re-read the key slot, re-apply, re-render.
+     * @param {any} prefs
      */
     _onRemoteSettingsChange(prefs) {
       this._prefs = prefs;
@@ -6518,8 +6582,8 @@ ${text}`;
       });
     }
     /**
-     * @param {object} record
-     * @param {{immediate?: boolean}} [opts] immediate: ignore Date and send the bot in
+     * @param {any} record
+     * @param {{immediate?: boolean}} [options] immediate: ignore Date and send the bot in
      *   right now. Lets you override a scheduled meeting without clearing the field.
      */
     async _startBot(record, options = {}) {
@@ -6529,8 +6593,14 @@ ${text}`;
         this._toast("Notetaker is already being created", "Please wait for the current request to finish.");
         return active;
       }
-      return runCoalesced(this._botCreateInFlight, key, () => this._startBotOnce(record, options));
+      return runCoalesced(
+        /** @type {any} */
+        this._botCreateInFlight,
+        key,
+        () => this._startBotOnce(record, options)
+      );
     }
+    /** @param {any} record */
     async _startBotOnce(record, { immediate = false } = {}) {
       if (!record) return this._toast("Open a Meeting record first", "This button needs an active record in this collection.");
       if (!this._settings.recallApiKey) return this._toast("Recall API key required", "Open Plugin: Meetings and add a Recall API key.");
@@ -6576,7 +6646,10 @@ ${text}`;
         this._toast("Unable to send transcriber", this._errorMessage(err));
       }
     }
-    /** Delete a future scheduled bot. Scheduled bots are not in a call, so `leave_call` is invalid. */
+    /**
+     * Delete a future scheduled bot. Scheduled bots are not in a call, so `leave_call` is invalid.
+     * @param {any} record
+     */
     async _cancelScheduledBot(record) {
       const botId = record ? this._text(record, FIELDS.BOT_ID) : "";
       if (!botId) return this._toast("No scheduled bot to cancel", "This meeting has no booked bot.");
@@ -6598,7 +6671,8 @@ ${text}`;
           if (!response.ok) throw new Error(recallError(await response.json().catch(() => ({})), response.status));
         }
         this._stopPolling(botId);
-        if (record.guid) this._autoScheduled.add(record.guid);
+        if (record.guid) /** @type {Set<string>} */
+        this._autoScheduled.add(record.guid);
         this._setField(record, FIELDS.BOT_ID, "");
         this._setField(record, FIELDS.STATUS, "cancelled");
         this._setField(record, FIELDS.LAST_ERROR, "");
@@ -6614,6 +6688,7 @@ ${text}`;
      * Pull the notetaker out of the call. Recall keeps whatever it already recorded, so polling
      * carries on and the transcript and summary still land — this ends the bot's attendance, it does
      * not throw the meeting away.
+     * @param {any} record
      */
     async _stopBot(record) {
       const botId = record ? this._text(record, FIELDS.BOT_ID) : "";
@@ -6644,10 +6719,12 @@ ${text}`;
       this._updateNavButtonForRecord(record);
     }
     /**
-     * @param {{immediate?: boolean}} [opts] Threaded from `_startBot`. It MUST be a parameter: when
-     *   it was only referenced here, `immediate` was a free variable bound to nothing, so every send
-     *   threw `ReferenceError: immediate is not defined` — swallowed by `_startBot`'s catch into a
-     *   bare "Unable to send transcriber" toast. No bot could be sent at all (1.6.0–1.7.0).
+     * Threaded from `_startBot`. `immediate` MUST be a parameter: when it was only
+     * referenced here, `immediate` was a free variable bound to nothing, so every send
+     * threw `ReferenceError: immediate is not defined` — swallowed by `_startBot`'s catch into a
+     * bare "Unable to send transcriber" toast. No bot could be sent at all (1.6.0–1.7.0).
+     * @param {any} record
+     * @param {string} meetingUrl
      */
     async _createRecallBot(record, meetingUrl, { immediate = false } = {}) {
       const payload = this._createBotPayload(record, meetingUrl, { immediate });
@@ -6670,30 +6747,43 @@ ${text}`;
       if (!response.ok) throw new Error(recallError(json, response.status));
       return json;
     }
+    /**
+     * @param {any} record
+     * @param {string} meetingUrl
+     */
     _createBotPayload(record, meetingUrl, { immediate = false } = {}) {
-      const payload = {
-        meeting_url: meetingUrl,
-        bot_name: this._settings.botName || DEFAULT_SETTINGS.botName,
-        recording_config: {
-          transcript: {
-            provider: {
-              recallai_streaming: {
-                mode: "prioritize_low_latency",
-                language_code: "en"
+      const payload = (
+        /** @type {any} */
+        {
+          meeting_url: meetingUrl,
+          bot_name: this._settings.botName || DEFAULT_SETTINGS.botName,
+          recording_config: {
+            transcript: {
+              provider: {
+                recallai_streaming: {
+                  mode: "prioritize_low_latency",
+                  language_code: "en"
+                }
+              },
+              diarization: {
+                use_separate_streams_when_available: true
               }
-            },
-            diarization: {
-              use_separate_streams_when_available: true
             }
+          },
+          metadata: {
+            source: "thymer-recall-ai-plugin",
+            record_guid: record.guid || "",
+            collection_guid: this.collection.getGuid ? this.collection.getGuid() : "",
+            workspace_guid: (
+              /** @type {any} */
+              this.getWorkspaceGuid ? (
+                /** @type {any} */
+                this.getWorkspaceGuid()
+              ) : ""
+            )
           }
-        },
-        metadata: {
-          source: "thymer-recall-ai-plugin",
-          record_guid: record.guid || "",
-          collection_guid: this.collection.getGuid ? this.collection.getGuid() : "",
-          workspace_guid: this.getWorkspaceGuid ? this.getWorkspaceGuid() : ""
         }
-      };
+      );
       const retention = recordingRetentionConfig(this._settings.recordingRetention);
       if (retention) payload.recording_config.retention = retention;
       if (this._bridgeUrl()) {
@@ -6715,6 +6805,10 @@ ${text}`;
       }
       return payload;
     }
+    /**
+     * @param {any} record
+     * @param {{botId?: string, summarize?: boolean, quiet?: boolean, repair?: boolean}} [options]
+     */
     async _syncRecord(record, options = {}) {
       const knownBotId = options.botId || "";
       const botId = knownBotId || (record ? this._text(record, FIELDS.BOT_ID) : "");
@@ -6732,6 +6826,7 @@ ${text}`;
         if (this._syncInFlight && this._syncInFlight.get(syncKey) === task) this._syncInFlight.delete(syncKey);
       }
     }
+    /** @param {any} record */
     async _syncRecordOnce(record, { summarize = false, quiet = false, repair = false, botId: knownBotId = "" } = {}) {
       if (!record) {
         if (!quiet) this._toast("Open a Meeting record first", "Sync needs a meeting record with a Bot ID.");
@@ -6763,7 +6858,8 @@ ${text}`;
         const ended = !!bot && isMeetingEndedStatus(recallStatus);
         const recallFailed = !!bot && isFatalStatus(recallStatus);
         const rawEntries = transcriptEntries(transcript);
-        if (transcript && transcript.debug && record.guid) this._diagnosticsByRecord.set(record.guid, transcript.debug);
+        if (transcript && transcript.debug && record.guid) /** @type {Map<string, any>} */
+        this._diagnosticsByRecord.set(record.guid, transcript.debug);
         const entries = ended && !liveTranscript ? coalesceAdjacentTranscriptEntries(rawEntries) : rawEntries;
         const transcriptText = entriesToText(entries, this._settings);
         this._log("sync poll", {
@@ -6865,6 +6961,7 @@ ${text}`;
         return false;
       }
     }
+    /** @param {string} path */
     async _fetchRecallJson(path) {
       if (this._bridgeUrl()) {
         const transcriptMatch = path.match(/^\/api\/v1\/bot\/([^/]+)\/transcript\/?$/);
@@ -6893,6 +6990,10 @@ ${text}`;
       if (!response.ok) throw new Error(recallError(json, response.status));
       return json;
     }
+    /**
+     * @param {string} botId
+     * @param {any[]} entries
+     */
     async _fetchFinalParticipants(botId, entries) {
       let participants = [];
       let source = "transcript";
@@ -6914,6 +7015,10 @@ ${text}`;
       if (!participants.length) participants = participantsFromTranscriptEntries(entries);
       return { participants: dedupeParticipants(participants), source };
     }
+    /**
+     * @param {any} peopleCollection
+     * @param {any} participant
+     */
     async _createMissingPerson(peopleCollection, participant) {
       const name = String(participant && participant.name || "").trim().replace(/\s+/g, " ");
       if (!name || !peopleCollection || typeof peopleCollection.createRecord !== "function") return null;
@@ -6923,23 +7028,33 @@ ${text}`;
       } catch {
       }
       const key = `${collectionGuid}:${normalizeIdentity(name)}`;
-      return runCoalesced(this._personCreateInFlight, key, async () => {
-        const latest = typeof peopleCollection.getAllRecords === "function" ? await peopleCollection.getAllRecords() : [];
-        const rematched = matchParticipantsToPeople([participant], latest);
-        if (rematched.guids.length) return { guid: rematched.guids[0], created: false };
-        if (!rematched.creatableParticipants.length) return null;
-        const guid = peopleCollection.createRecord(name);
-        if (!guid) return null;
-        let person = typeof peopleCollection.getRecord === "function" ? peopleCollection.getRecord(guid) : null;
-        if (!person && typeof peopleCollection.getAllRecords === "function") {
-          const created = (await peopleCollection.getAllRecords()).find((item) => item && item.guid === guid) || null;
-          person = created;
+      return runCoalesced(
+        /** @type {any} */
+        this._personCreateInFlight,
+        key,
+        async () => {
+          const latest = typeof peopleCollection.getAllRecords === "function" ? await peopleCollection.getAllRecords() : [];
+          const rematched = matchParticipantsToPeople([participant], latest);
+          if (rematched.guids.length) return { guid: rematched.guids[0], created: false };
+          if (!rematched.creatableParticipants.length) return null;
+          const guid = peopleCollection.createRecord(name);
+          if (!guid) return null;
+          let person = typeof peopleCollection.getRecord === "function" ? peopleCollection.getRecord(guid) : null;
+          if (!person && typeof peopleCollection.getAllRecords === "function") {
+            const created = (await peopleCollection.getAllRecords()).find((item) => item && item.guid === guid) || null;
+            person = created;
+          }
+          if (person) assignPersonEmail(person, participant.email);
+          return { guid, created: true };
         }
-        if (person) assignPersonEmail(person, participant.email);
-        return { guid, created: true };
-      });
+      );
     }
-    /** Match Recall participants to Attendees. Unmatched names get a confirm dialog — never auto-create. */
+    /**
+     * Match Recall participants to Attendees. Unmatched names get a confirm dialog — never auto-create.
+     * @param {any} record
+     * @param {string} botId
+     * @param {any[]} entries
+     */
     async _syncMeetingAttendees(record, botId, entries) {
       try {
         if (!this._isOurRecord(record)) return;
@@ -6972,7 +7087,10 @@ ${text}`;
           }
         } else {
           if (!this._workspaceCollectionsLoaded) await this._loadWorkspaceCollections(true);
-          peopleCollection = guessPeopleCollection(this._workspaceCollections);
+          peopleCollection = guessPeopleCollection(
+            /** @type {any[]} */
+            this._workspaceCollections
+          );
         }
         if (!peopleCollection || typeof peopleCollection.getAllRecords !== "function") {
           this._log("people linking skipped: People collection is unavailable", { personCollectionGuid: personCollectionGuid || "auto" });
@@ -7016,9 +7134,18 @@ ${text}`;
       }
       return existing;
     }
+    /**
+     * @param {any} record
+     * @param {string} botId
+     * @param {any[]} unmatched
+     * @param {any} peopleCollection
+     * @param {any} field
+     */
     _promptUnmatchedParticipants(record, botId, unmatched, peopleCollection, field) {
       const key = `${record && record.guid || ""}:${botId || ""}`;
-      if (!key || this._attendeePrompted.has(key)) return;
+      if (!key || /** @type {Set<string>} */
+      this._attendeePrompted.has(key)) return;
+      /** @type {Set<string>} */
       this._attendeePrompted.add(key);
       openParticipantConfirmDialog({
         rootClass: ROOT_CLASS,
@@ -7026,6 +7153,12 @@ ${text}`;
         onConfirm: /* @__PURE__ */ __name((creates) => void this._addConfirmedPeople(record, peopleCollection, field, creates), "onConfirm")
       });
     }
+    /**
+     * @param {any} record
+     * @param {any} peopleCollection
+     * @param {any} field
+     * @param {any[]} creates
+     */
     async _addConfirmedPeople(record, peopleCollection, field, creates) {
       if (!this._isOurRecord(record) || !Array.isArray(creates) || !creates.length) return;
       const prop = this._prop(record, field && field.id);
@@ -7043,6 +7176,11 @@ ${text}`;
       if (next.length) prop.set(next);
       if (createdGuids.length) this._toast("People added", `${createdGuids.length} attendee${createdGuids.length === 1 ? "" : "s"} linked.`);
     }
+    /**
+     * @param {any} record
+     * @param {string} transcriptText
+     * @param {any[]} entries
+     */
     async _summarize(record, transcriptText, entries, { deferTranscriptBody = false } = {}) {
       if (!this._settings.anthropicApiKey) {
         this._setField(record, FIELDS.LAST_ERROR, "Anthropic API key is missing; transcript fetched but summary was skipped.");
@@ -7116,7 +7254,12 @@ ${sectionJsonInstruction(entries.length)}`;
       const cited = extractSummaryCitations(sanitized, parsed.sections);
       return { summary: cited.markdown, sections: parsed.sections, citations: cited.citations };
     }
-    /** POST the summary request to the bridge or to Anthropic directly; returns Claude's raw text. */
+    /**
+     * POST the summary request to the bridge or to Anthropic directly; returns Claude's raw text.
+     * @param {string} prompt
+     * @param {string} transcriptText
+     * @param {number} maxTokens
+     */
     async _callClaude(prompt, transcriptText, maxTokens) {
       if (this._bridgeUrl()) {
         const json2 = await this._bridgeJson("/api/anthropic/summary", {
@@ -7156,18 +7299,40 @@ ${transcriptText}` }]
      * another device or an interrupted write to resume the same structure. localStorage is retained only
      * as a legacy/cache hint; unowned content is never cleared or rewritten.
      */
+    /**
+     * @param {any} record
+     * @param {string} suffix
+     */
     _bodyKey(record, suffix) {
       return `recall-ai/${this._selfGuid() || "collection"}/${record && record.guid || ""}/${suffix}`;
     }
+    /**
+     * @param {any} line
+     * @param {string} key
+     */
     _lineMeta(line, key) {
       return lineMeta(line, key);
     }
+    /**
+     * @param {any} line
+     * @param {string} botId
+     */
     _isOwnedLine(line, botId, role = "") {
       return isOwnedLine(line, botId, role);
     }
+    /**
+     * @param {any[]} items
+     * @param {string} botId
+     * @param {string} role
+     */
     _findOwnedLine(items, botId, role, index = null) {
       return findOwnedLine(items, botId, role, index) || findOwnedRole(items, role, index);
     }
+    /**
+     * @param {any} line
+     * @param {string} botId
+     * @param {string} role
+     */
     async _markOwnedLine(line, botId, role, extra = {}) {
       if (!line || typeof line.setMetaProperties !== "function" || !botId || !role) return false;
       const props = ownershipProps(botId, role, extra);
@@ -7180,6 +7345,13 @@ ${transcriptText}` }]
         return false;
       }
     }
+    /**
+     * @param {any[]} items
+     * @param {any} heading
+     * @param {string} botId
+     * @param {any[]} tracked
+     * @param {any} written
+     */
     async _migrateLegacyTranscriptMetadata(items, heading, botId, tracked, written) {
       if (!heading || !botId) return;
       await this._markOwnedLine(heading, botId, BODY_ROLES.TRANSCRIPT);
@@ -7195,6 +7367,12 @@ ${transcriptText}` }]
         }
       }
     }
+    /**
+     * @param {any} record
+     * @param {string} botId
+     * @param {string} role
+     * @param {string} legacySuffix
+     */
     async _bodyOwnershipState(record, botId, role, legacySuffix, completed = false) {
       if (!record || typeof record.getLineItems !== "function") return "unavailable";
       try {
@@ -7215,6 +7393,7 @@ ${transcriptText}` }]
       return completed ? "unknown" : "missing";
     }
     /** insertFromMarkdown treats `#` before a digit as a hashtag — escape so "#5" stays literal. */
+    /** @param {string} text */
     _escMd(text) {
       return String(text || "").replace(/#(?=\d)/g, "\\#");
     }
@@ -7222,6 +7401,10 @@ ${transcriptText}` }]
      * The body-anchor markdown for a heading setting: an h1/h2/h3 markdown heading, or — for level
      * 'none' — a plain text line (content just nests beneath it, no heading chrome). The `#` prefix is
      * NOT escaped (it must stay a heading marker); only the user's text runs through `_escMd`.
+     */
+    /**
+     * @param {string} text
+     * @param {string} level
      */
     _headingAnchorMd(text, level) {
       const t = this._escMd(String(text || "").trim());
@@ -7234,6 +7417,7 @@ ${transcriptText}` }]
       const level = ["h1", "h2", "h3", "none"].includes(this._settings && this._settings[spec.headingLevelKey]) ? this._settings[spec.headingLevelKey] : spec.fallbackLevel;
       return { text, level };
     }
+    /** @param {any} record */
     _isOurRecord(record) {
       return isOwnedMeetingRecord(record, this._selfGuid(), this._recordsByGuid);
     }
@@ -7303,6 +7487,7 @@ ${transcriptText}` }]
         }
       });
     }
+    /** @param {any} record */
     async _readNotesText(record) {
       if (!record || typeof record.getLineItems !== "function") return "";
       try {
@@ -7315,6 +7500,7 @@ ${transcriptText}` }]
       }
     }
     /** Existing Transcript heading descendants — the on-page artifact, not a new Recall fetch. */
+    /** @param {any} record */
     async _readTranscriptText(record) {
       if (!record || typeof record.getLineItems !== "function") return "";
       try {
@@ -7330,6 +7516,7 @@ ${transcriptText}` }]
      * Prefer the meeting body's Transcript. If that is empty and a bot already exists, fetch
      * Recall's artifact — never create or join a bot.
      */
+    /** @param {any} record */
     async _readTranscriptForSummary(record) {
       const fromBody = await this._readTranscriptText(record);
       if (fromBody) return fromBody;
@@ -7345,6 +7532,7 @@ ${transcriptText}` }]
         return "";
       }
     }
+    /** @param {any} record */
     async _openRegenerateMenu(record) {
       const choice = await openChoiceApplyDialog({
         rootClass: ROOT_CLASS,
@@ -7362,6 +7550,7 @@ ${transcriptText}` }]
       if (choice === "both") return this._regenerateBoth(record);
       return false;
     }
+    /** @param {{title: string, body: any, confirmLabel?: string}} options */
     async _confirmBodyWrite({ title, body, confirmLabel = "Apply" }) {
       return openConfirmDialog({
         rootClass: ROOT_CLASS,
@@ -7371,6 +7560,7 @@ ${transcriptText}` }]
         cancelLabel: "Cancel"
       });
     }
+    /** @param {any} record */
     async _confirmRepairMeeting(record) {
       const ok = await this._confirmBodyWrite({
         title: "Repair Meeting",
@@ -7393,6 +7583,7 @@ ${transcriptText}` }]
      * Re-run the current summary prompt against the existing transcript + Notes.
      * Rewrites Summary only. Never touches Action items, Notes, Transcript, or bot join.
      */
+    /** @param {any} record */
     async _regenerateSummary(record, { confirmed = false } = {}) {
       if (this._disabled) {
         this._toast("Meetings is off", "Turn the plugin on to regenerate a summary.");
@@ -7452,6 +7643,7 @@ ${transcriptText}` }]
      * Re-run Action items only from the existing transcript + Notes.
      * Never touches Summary, Notes, Transcript, or bot join.
      */
+    /** @param {any} record */
     async _regenerateActionItems(record, { confirmed = false } = {}) {
       if (this._disabled) {
         this._toast("Meetings is off", "Turn the plugin on to regenerate action items.");
@@ -7508,6 +7700,7 @@ ${transcriptText}` }]
     /**
      * Rewrite Summary and Action items in one Apply. Notes and Transcript stay.
      */
+    /** @param {any} record */
     async _regenerateBoth(record) {
       if (this._disabled) {
         this._toast("Meetings is off", "Turn the plugin on to regenerate the meeting write-up.");
@@ -7559,6 +7752,10 @@ ${transcriptText}` }]
         }
       });
     }
+    /**
+     * @param {any} record
+     * @param {string} transcriptText
+     */
     async _createActionItems(record, transcriptText) {
       let prompt = DEFAULT_ACTION_ITEMS_PROMPT;
       const notes = await this._readNotesText(record);
@@ -7582,6 +7779,10 @@ ${notes}`;
      * only a fast cache and a migration path for meetings created before schema metadata existed.
      *
      * NEVER navigates or repaints — appending nodes elsewhere in the doc leaves your cursor alone.
+     */
+    /**
+     * @param {any} record
+     * @param {any[]} entries
      */
     async _streamTranscriptToBody(record, entries) {
       if (!record || typeof record.insertFromMarkdown !== "function" || typeof record.createLineItem !== "function" || typeof record.getLineItems !== "function") return;
@@ -7707,6 +7908,11 @@ ${notes}`;
      * move existing streamed turns under section nodes, or build the sectioned shape directly when live
      * rows never arrived. A mismatch is left intact: this path never rebuilds or replays an existing
      * transcript. Returns stable line-item GUIDs for topic headings and exact final entries.
+     */
+    /**
+     * @param {any} record
+     * @param {any[]} entries
+     * @param {any[]} sections
      */
     async _reorganizeTranscriptBySections(record, entries, sections) {
       if (!record || typeof record.insertFromMarkdown !== "function" || typeof record.createLineItem !== "function" || typeof record.getLineItems !== "function") return { ok: false, anchors: [], turnAnchors: [] };
@@ -7847,7 +8053,10 @@ ${notes}`;
                   }
                   if (await turn.delete()) newTracked.delete(turn.guid);
                 }
-                const moved = await primary.move(secNode, afterTurn);
+                const moved = (
+                  /** @type {any} */
+                  await primary.move(secNode, afterTurn)
+                );
                 if (!moved) continue;
                 await this._markOwnedLine(moved, botId, "transcript_turn", { entryIndex: index });
                 if (primaryText) await this._markOwnedLine(primaryText, botId, "transcript_text", { entryIndex: index });
@@ -7856,7 +8065,10 @@ ${notes}`;
               } else {
                 let movedAny = false;
                 for (const turn of group) {
-                  const moved = await turn.move(secNode, afterTurn);
+                  const moved = (
+                    /** @type {any} */
+                    await turn.move(secNode, afterTurn)
+                  );
                   if (!moved) continue;
                   afterTurn = moved;
                   movedAny = true;
@@ -7878,7 +8090,10 @@ ${notes}`;
             } else {
               const inline = settings.transcriptLayout === "inline";
               const line = inline ? `${formatEntryHeader(e, settings)}: ${e.text}` : formatEntryHeader(e, settings);
-              const turn = await record.createLineItem(secNode, afterTurn, "text", [{ type: "text", text: line }], null);
+              const turn = (
+                /** @type {any} */
+                await record.createLineItem(secNode, afterTurn, "text", [{ type: "text", text: line }], null)
+              );
               if (!turn) continue;
               await this._markOwnedLine(turn, botId, "transcript_turn", { entryIndex: index });
               newTracked.add(turn.guid);
@@ -7931,7 +8146,13 @@ ${notes}`;
         return { ok: false, anchors: [], turnAnchors: [] };
       }
     }
-    /** Recover persisted section GUIDs after a summary retry, or derive them from the transcript tree. */
+    /**
+     * Recover persisted section GUIDs after a summary retry, or derive them from the transcript tree.
+     * @param {any} record
+     * @param {any[]} entries
+     * @param {any[]} sections
+     * @param {string} anchorsKey
+     */
     async _recoverTranscriptSectionAnchors(record, entries, sections, anchorsKey) {
       let items = [];
       try {
@@ -8001,7 +8222,14 @@ ${notes}`;
       }
       return [];
     }
-    /** Recover exact transcript-entry targets for a summary retry; unresolved entries use section refs. */
+    /**
+     * Recover exact transcript-entry targets for a summary retry; unresolved entries use section refs.
+     * @param {any} record
+     * @param {any[]} entries
+     * @param {any[]} sections
+     * @param {any[]} sectionAnchors
+     * @param {string} turnAnchorsKey
+     */
     async _recoverTranscriptTurnAnchors(record, entries, sections, sectionAnchors, turnAnchorsKey) {
       let items = [];
       try {
@@ -8066,6 +8294,10 @@ ${notes}`;
      * Append resolved transcript references to an already-parsed summary line. `setSegments`
      * changes only the line's inline content, so a Thymer task stays a task (and keeps its checkbox).
      * Citation failures are deliberately non-fatal: the summary line is still useful without its link.
+     * @param {any} lineItem
+     * @param {any[]} citations
+     * @param {any} sectionAnchorById
+     * @param {any} turnAnchorByIndex
      */
     async _appendSummaryReferences(lineItem, citations, sectionAnchorById, turnAnchorByIndex) {
       if (!lineItem || typeof lineItem.setSegments !== "function" || !Array.isArray(citations) || !citations.length) return;
@@ -8078,12 +8310,17 @@ ${notes}`;
         this._log("summary citation skipped", { lineItemGuid: lineItem.guid, error: this._errorMessage(err) });
       }
     }
+    /** @param {any} line */
     _linePlainText(line) {
       return (Array.isArray(line && line.segments) ? line.segments : []).map((segment) => {
         if (!segment || segment.type === "ref") return "";
         return typeof segment.text === "string" ? segment.text : "";
       }).join("").trim();
     }
+    /**
+     * @param {any[]} items
+     * @param {string} botId
+     */
     async _restoreMarkedSummaryReferences(items, botId) {
       const sectionAnchorById = /* @__PURE__ */ new Map();
       const turnAnchorByIndex = /* @__PURE__ */ new Map();
@@ -8115,6 +8352,12 @@ ${notes}`;
      * the transcript heading (summary on top, transcript below). Rich markdown — headings, bold,
      * action-item checkboxes — because the body parses it, unlike the flat property. When transcript
      * section anchors exist, every cited content line receives a native Thymer reference chip.
+     * @param {any} record
+     * @param {string} summary
+     * @param {any[]} [citations]
+     * @param {any[]} [sectionAnchors]
+     * @param {any[]} [turnAnchors]
+     * @param {any} [options]
      */
     async _writeSummaryToBody(record, summary, citations = [], sectionAnchors = [], turnAnchors = [], options = {}) {
       if (!record || typeof record.insertFromMarkdown !== "function" || !summary || !summary.trim()) return false;
@@ -8207,7 +8450,13 @@ ${notes}`;
         let actionItemIndex = 0;
         let writtenItems = 0;
         const insertOwnedLine = /* @__PURE__ */ __name(async (entry, parent, after, role, index) => {
-          const existing = this._findOwnedLine(items, botId, role, index);
+          const existing = this._findOwnedLine(
+            items,
+            botId,
+            role,
+            /** @type {any} */
+            index
+          );
           if (existing) {
             await this._appendSummaryReferences(existing, entry.citations, sectionAnchorById, turnAnchorByIndex);
             writtenItems += 1;
@@ -8270,6 +8519,10 @@ ${notes}`;
      * Delete owned Summary and/or Action items content, then write a fresh outline.
      * Leaves Notes and Transcript (and their descendants) untouched.
      * `options.section`: 'all' | 'summary' | 'actions'
+     * @param {any} record
+     * @param {string} summary
+     * @param {any[]} [citations]
+     * @param {any} [options]
      */
     async _replaceSummaryBody(record, summary, citations = [], options = {}) {
       if (!record || typeof record.getLineItems !== "function") return false;
@@ -8290,6 +8543,11 @@ ${notes}`;
       }
       return this._writeSummaryToBody(record, summary, citations, [], [], { force: true, section: section2 });
     }
+    /**
+     * @param {any[]} items
+     * @param {any} line
+     * @param {string} rootGuid
+     */
     _lineIsUnder(items, line, rootGuid) {
       if (!line || !rootGuid || line.guid === rootGuid) return false;
       const byGuid = new Map((Array.isArray(items) ? items : []).map((item) => [item.guid, item]));
@@ -8303,6 +8561,10 @@ ${notes}`;
       }
       return false;
     }
+    /**
+     * @param {any[]} items
+     * @param {any} line
+     */
     _lineDepth(items, line) {
       const byGuid = new Map((Array.isArray(items) ? items : []).map((item) => [item.guid, item]));
       let depth = 0;
@@ -8316,10 +8578,21 @@ ${notes}`;
       }
       return depth;
     }
+    /**
+     * @param {any[]} items
+     * @param {any} record
+     * @param {string} role
+     * @param {string} headingTextKey
+     * @param {string} fallbackLabel
+     */
     _sectionRoot(items, record, role, headingTextKey, fallbackLabel) {
       const botId = this._text(record, FIELDS.BOT_ID) || TEMPLATE_OWNER;
       return this._findOwnedLine(items, botId, role) || guessHeadingByLabel(items, record && record.guid, this._settings && this._settings[headingTextKey] || fallbackLabel);
     }
+    /**
+     * @param {any[]} items
+     * @param {any} record
+     */
     _collectMashedSummaryBlobs(items, record) {
       const list2 = Array.isArray(items) ? items : [];
       const recordGuid = record && record.guid || "";
@@ -8355,6 +8628,10 @@ ${notes}`;
       }
       return blobs;
     }
+    /**
+     * @param {any[]} items
+     * @param {any[]} blobs
+     */
     async _deleteHealRewriteNodes(items, blobs, section2 = "all") {
       const rewriteRoles = /* @__PURE__ */ new Set();
       if (section2 === "all" || section2 === "summary") {
@@ -8380,6 +8657,7 @@ ${notes}`;
       return true;
     }
     /**
+     * @param {any} record
      * @returns {Promise<'healed'|'skipped'|'failed'>}
      */
     async _healMashedSummaryRecord(record, { quiet: _quiet = false } = {}) {
@@ -8431,6 +8709,11 @@ ${recovered}`;
         return "failed";
       }
     }
+    /**
+     * @param {any} record
+     * @param {any[]} items
+     * @param {any[]} blobs
+     */
     async _healMashedBlobsInPlace(record, items, blobs) {
       const botId = this._text(record, FIELDS.BOT_ID) || TEMPLATE_OWNER;
       for (const blob of blobs) {
@@ -8459,6 +8742,7 @@ ${recovered}`;
       }
       return true;
     }
+    /** @param {any} record */
     async _healMashedSummariesForRecord(record, { quiet = false } = {}) {
       if (this._disabled) {
         if (!quiet) this._toast("Meetings is off", "Turn the plugin on to heal summaries.");
@@ -8468,7 +8752,12 @@ ${recovered}`;
         if (!quiet) this._toast("Open a Meeting record first", "Heal mashed summaries needs an open meeting.");
         return "failed";
       }
-      const result = await runCoalesced(this._healRecordInFlight, record.guid, () => this._healMashedSummaryRecord(record, { quiet: true }));
+      const result = await runCoalesced(
+        /** @type {any} */
+        this._healRecordInFlight,
+        record.guid,
+        () => this._healMashedSummaryRecord(record, { quiet: true })
+      );
       if (!quiet) {
         if (result === "healed") this._toast("Heal mashed summaries", "1 meeting healed");
         else if (result === "skipped") this._toast("Heal mashed summaries", "Already healthy \u2014 nothing to rewrite");
@@ -8514,8 +8803,17 @@ ${recovered}`;
         let healed = 0;
         let skipped = 0;
         let failed = 0;
-        for (const record of this._recordsByGuid.values()) {
-          const result = await runCoalesced(this._healRecordInFlight, record.guid, () => this._healMashedSummaryRecord(record, { quiet: true }));
+        for (
+          const record of
+          /** @type {Map<string, any>} */
+          this._recordsByGuid.values()
+        ) {
+          const result = await runCoalesced(
+            /** @type {any} */
+            this._healRecordInFlight,
+            record.guid,
+            () => this._healMashedSummaryRecord(record, { quiet: true })
+          );
           if (result === "healed") healed += 1;
           else if (result === "skipped") skipped += 1;
           else failed += 1;
@@ -8631,6 +8929,7 @@ ${recovered}`;
         if (this._cleanupInFlight === task) this._cleanupInFlight = null;
       }
     }
+    /** @param {any} record */
     async _applyHeadingFormatForRecord(record, { quiet = false } = {}) {
       if (this._disabled) {
         if (!quiet) this._toast("Meetings is off", "Turn the plugin on to apply heading format.");
@@ -8659,7 +8958,11 @@ ${recovered}`;
         let updated = 0;
         let skipped = 0;
         let failed = 0;
-        for (const record of this._recordsByGuid.values()) {
+        for (
+          const record of
+          /** @type {Map<string, any>} */
+          this._recordsByGuid.values()
+        ) {
           if (!this._isOurRecord(record)) continue;
           const result = await this._applyHeadingFormatRecord(record);
           if (result === "updated") updated += 1;
@@ -8676,6 +8979,7 @@ ${recovered}`;
         if (this._headingRepairInFlight === task) this._headingRepairInFlight = null;
       }
     }
+    /** @param {any} record */
     async _applyHeadingFormatRecord(record) {
       if (!record || !this._isOurRecord(record)) return "failed";
       if (typeof record.getLineItems !== "function") return "failed";
@@ -8735,7 +9039,10 @@ ${recovered}`;
             if (!slot.guid) continue;
             const heading = items.find((item) => item && item.guid === slot.guid) || null;
             if (!heading || typeof heading.move !== "function") continue;
-            const moved = await heading.move(record, after);
+            const moved = (
+              /** @type {any} */
+              await heading.move(record, after)
+            );
             after = moved || heading;
             changed = true;
           }
@@ -8769,10 +9076,16 @@ ${recovered}`;
       } catch {
       }
     }
-    /** True when the caret/focus sits inside this panel's editor — i.e. the user is actively typing. */
+    /**
+     * True when the caret/focus sits inside this panel's editor — i.e. the user is actively typing.
+     * @param {any} panel
+     */
     _userTypingInPanel(panel2) {
       try {
-        const el2 = document.activeElement;
+        const el2 = (
+          /** @type {HTMLElement|null} */
+          document.activeElement
+        );
         if (!el2) return false;
         const root = panel2 && panel2.getElement ? panel2.getElement() : null;
         if (!root || !root.contains(el2)) return false;
@@ -8781,6 +9094,10 @@ ${recovered}`;
         return false;
       }
     }
+    /**
+     * @param {any} record
+     * @param {string} botId
+     */
     _ensurePolling(record, botId) {
       if (!this._pollers) this._pollers = /* @__PURE__ */ new Map();
       if (!record || !botId || this._pollers.has(botId)) return;
@@ -8802,6 +9119,7 @@ ${recovered}`;
       this._log("polling started", { botId, pollSeconds: this._settings.pollSeconds });
       setTimeout(tick, 1e3);
     }
+    /** @param {string} botId */
     _stopPolling(botId) {
       if (!this._pollers) return;
       const poller = this._pollers.get(botId);
@@ -8815,6 +9133,7 @@ ${recovered}`;
       if (record && record.guid) this._activeRecordGuid = record.guid;
       this._updateNavButtonForRecord(record);
     }
+    /** @param {any} record */
     _updateNavButtonForRecord(record) {
       const pageRecord = (() => {
         try {
@@ -8833,11 +9152,14 @@ ${recovered}`;
         }
       }
       if (!this._navButton && !this._regenerateButton) return;
-      const target = record || this._activeRecordGuid && this._recordsByGuid.get(this._activeRecordGuid) || null;
+      const target = record || this._activeRecordGuid && /** @type {Map<string, any>} */
+      this._recordsByGuid.get(this._activeRecordGuid) || null;
       const state = this._recordVisualState(target);
       const regenBusy = !pinVisible || state.kind === "summarizing";
       try {
-        if (this._regenerateButton && typeof this._regenerateButton.setDisabled === "function") {
+        if (this._regenerateButton && typeof /** @type {any} */
+        this._regenerateButton.setDisabled === "function") {
+          /** @type {any} */
           this._regenerateButton.setDisabled(regenBusy);
         }
       } catch {
@@ -8873,6 +9195,10 @@ ${recovered}`;
       bindNavTooltip(this._diagnosticsButton, "Diagnostics");
       this._stampIconNavTipsInDom();
     }
+    /**
+     * @param {any} element
+     * @param {string} text
+     */
     _stampIconNavFromClick(element, text) {
       if (element) stampNavTooltip(element, text);
       this._bindIconNavTooltips();
@@ -8883,9 +9209,17 @@ ${recovered}`;
         for (const tip of document.querySelectorAll(".plg-recall-ai__nav-tip")) {
           const label = tip.getAttribute("data-tooltip") || tip.getAttribute("title") || "";
           if (!label) continue;
-          stampNavTooltip(tip, label);
+          stampNavTooltip(
+            /** @type {HTMLElement} */
+            tip,
+            label
+          );
           const btn = tip.closest('button, .button-minimal, [role="button"]');
-          if (btn) stampNavTooltip(btn, label);
+          if (btn) stampNavTooltip(
+            /** @type {HTMLElement} */
+            btn,
+            label
+          );
         }
       } catch {
       }
@@ -8903,11 +9237,16 @@ ${recovered}`;
         }
       }
     }
+    /** @param {any} record */
     async _recordHasTranscriptContent(record) {
       if (!record) return false;
       const text = await this._readTranscriptText(record);
       return !!String(text || "").trim();
     }
+    /**
+     * @param {any} button
+     * @param {boolean} hidden
+     */
     _setNavButtonHidden(button2, hidden) {
       if (!button2) return false;
       try {
@@ -8926,6 +9265,10 @@ ${recovered}`;
       }
       return false;
     }
+    /**
+     * @param {any} record
+     * @param {string} kind
+     */
     async _refreshJoinButtonVisibility(record, kind) {
       const liveKinds = /* @__PURE__ */ new Set(["recording", "scheduled", "processing", "cancelling", "summarizing"]);
       let hide = false;
@@ -8950,17 +9293,24 @@ ${recovered}`;
         }
       }
     }
-    /** Meeting Date as epoch ms, or null when unset/unparseable. */
+    /**
+     * Meeting Date as epoch ms, or null when unset/unparseable.
+     * @param {any} record
+     */
     _joinAtMs(record) {
       const iso = this._joinAtIso(record);
       if (!iso) return null;
       const ms = Date.parse(iso);
       return Number.isFinite(ms) ? ms : null;
     }
-    /** True when Date is far enough out that (Date − 2 min) still meets Recall's scheduled-bot cliff. */
+    /**
+     * True when Date is far enough out that (Date − 2 min) still meets Recall's scheduled-bot cliff.
+     * @param {any} record
+     */
     _isScheduledDispatch(record) {
       return isSchedulableMeeting(this._joinAtMs(record));
     }
+    /** @param {any} record */
     _recordVisualState(record) {
       const IDLE = {
         kind: "idle",
@@ -9000,7 +9350,7 @@ ${recovered}`;
         icon: "loader-2",
         label: "Processing Transcript"
       };
-      if (botId && botJoinMs(this._joinAtMs(record)) > Date.now() && !isTerminalStatus(status) && status !== "error") return {
+      if (botId && (botJoinMs(this._joinAtMs(record)) ?? 0) > Date.now() && !isTerminalStatus(status) && status !== "error") return {
         kind: "scheduled",
         icon: "calendar",
         label: "Scheduled"
@@ -9037,11 +9387,18 @@ ${recovered}`;
       return headers;
     }
     _recallBaseUrl() {
-      return RECALL_REGIONS[this._settings.recallRegion] || RECALL_REGIONS["us-west-2"];
+      return RECALL_REGIONS[
+        /** @type {keyof typeof RECALL_REGIONS} */
+        this._settings.recallRegion
+      ] || RECALL_REGIONS["us-west-2"];
     }
     _bridgeUrl() {
       return String(this._settings.bridgeUrl || "").trim().replace(/\/+$/, "");
     }
+    /**
+     * @param {string} path
+     * @param {any} body
+     */
     async _bridgeJson(path, body) {
       const base = this._bridgeUrl();
       if (!base) throw new Error("Bridge URL is not configured.");
@@ -9054,6 +9411,7 @@ ${recovered}`;
       if (!response.ok) throw new Error(formatBridgeError(json, response.status));
       return json;
     }
+    /** @param {any} record */
     async _showMeetingDiagnostics(record) {
       if (!record) return this._toast("Open a Meeting record first", "Diagnostics needs an active Meeting record.");
       const botId = this._text(record, FIELDS.BOT_ID);
@@ -9066,7 +9424,8 @@ ${recovered}`;
           botId
         });
         const debug = result && result.debug || {};
-        if (record.guid) this._diagnosticsByRecord.set(record.guid, debug);
+        if (record.guid) /** @type {Map<string, any>} */
+        this._diagnosticsByRecord.set(record.guid, debug);
         const report = formatMeetingDiagnosticsReport({
           pluginVersion: PLUGIN_VERSION,
           recordGuid: record.guid || "",
@@ -9100,7 +9459,10 @@ ${recovered}`;
       }
     }
     _collectionFields() {
-      const conf = this.getConfiguration ? this.getConfiguration() : {};
+      const conf = (
+        /** @type {any} */
+        this.getConfiguration ? this.getConfiguration() : {}
+      );
       return Array.isArray(conf.fields) ? conf.fields.filter((field) => field && field.active !== false) : [];
     }
     /**
@@ -9120,7 +9482,8 @@ ${recovered}`;
       try {
         let workspace = "default";
         try {
-          workspace = this.getWorkspaceGuid?.() || "default";
+          workspace = /** @type {any} */
+          this.getWorkspaceGuid?.() || "default";
         } catch {
         }
         let collection = "collection";
@@ -9135,6 +9498,7 @@ ${recovered}`;
       }
       await api.saveConfiguration(configWithPluginVersion(migrated.configuration, {}, PLUGIN_VERSION));
     }
+    /** @param {any} id */
     _fieldById(id) {
       if (!id) return null;
       return this._collectionFields().find((field) => String(field.id) === String(id)) || null;
@@ -9143,6 +9507,7 @@ ${recovered}`;
       const selected = String(this._settings.attendeesFieldId || "").trim();
       return findAttendeesRelationField(this._collectionFields(), selected);
     }
+    /** @param {string} field */
     _mappingSettingFor(field) {
       if (field === FIELDS.MEETING_URL) return "meetingUrlFieldId";
       if (field === FIELDS.JOIN_AT) return "joinAtFieldId";
@@ -9151,6 +9516,7 @@ ${recovered}`;
       if (field === FIELDS.RELATED) return "relatedFieldId";
       return "";
     }
+    /** @param {string} field */
     _mappedFieldId(field) {
       const setting = this._mappingSettingFor(field);
       const mapped = setting ? String(this._settings[setting] || "").trim() : "";
@@ -9180,6 +9546,7 @@ ${recovered}`;
       }
       return ids;
     }
+    /** @param {any} record */
     _meetingUrl(record) {
       for (const fieldId of this._meetingUrlFieldIds()) {
         const value = this._text(record, fieldId);
@@ -9214,24 +9581,36 @@ ${recovered}`;
       if (this._disabled) return;
       if (!this._settings.autoSchedule) return;
       if (!this._settings.recallApiKey) return;
-      for (const record of this._recordsByGuid.values()) void this._maybeAutoSchedule(record);
+      for (
+        const record of
+        /** @type {Map<string, any>} */
+        this._recordsByGuid.values()
+      ) void this._maybeAutoSchedule(record);
     }
     /**
      * React to Date being set, changed, or cleared on a Meetings record.
      * Future Dates book immediately. Past / too-soon Dates toast Join Now instead of failing silent.
+     * @param {any} record
      */
     async _handleMeetingDateUpdate(record) {
       const guid = record && record.guid;
       if (!guid) return;
       const iso = this._joinAtIso(record) || "";
-      if (!this._lastJoinAtByGuid.has(guid)) {
+      if (!/** @type {Map<string, any>} */
+      this._lastJoinAtByGuid.has(guid)) {
+        /** @type {Map<string, any>} */
         this._lastJoinAtByGuid.set(guid, iso);
         return;
       }
-      const prev = this._lastJoinAtByGuid.get(guid) || "";
+      const prev = (
+        /** @type {Map<string, any>} */
+        this._lastJoinAtByGuid.get(guid) || ""
+      );
       if (iso === prev) return;
+      /** @type {Map<string, any>} */
       this._lastJoinAtByGuid.set(guid, iso);
       if (!iso) {
+        /** @type {Set<string>} */
         this._autoScheduled.delete(guid);
         const prevMs = Date.parse(prev);
         const wasFuture = Number.isFinite(prevMs) && (botJoinMs(prevMs) || 0) > Date.now();
@@ -9251,19 +9630,24 @@ ${recovered}`;
         );
         return;
       }
+      /** @type {Set<string>} */
       this._autoScheduled.delete(guid);
       if (this._settings.autoSchedule) await this._maybeAutoSchedule(record);
     }
+    /** @param {any} record */
     async _maybeAutoSchedule(record) {
       const guid = record && record.guid;
-      if (!guid || this._autoScheduled.has(guid)) return;
+      if (!guid || /** @type {Set<string>} */
+      this._autoScheduled.has(guid)) return;
       if (this._text(record, FIELDS.BOT_ID)) return;
       if (!this._meetingUrl(record)) return;
       if (!this._isScheduledDispatch(record)) return;
+      /** @type {Set<string>} */
       this._autoScheduled.add(guid);
       this._log("auto-scheduling bot", { recordGuid: guid });
       await this._startBot(record);
-      if (!this._text(record, FIELDS.BOT_ID)) this._autoScheduled.delete(guid);
+      if (!this._text(record, FIELDS.BOT_ID)) /** @type {Set<string>} */
+      this._autoScheduled.delete(guid);
     }
     async _refreshRecordIndex() {
       try {
@@ -9272,7 +9656,9 @@ ${recovered}`;
         for (const record of records) {
           if (record && record.guid) {
             this._recordsByGuid.set(record.guid, record);
-            if (!this._lastJoinAtByGuid.has(record.guid)) {
+            if (!/** @type {Map<string, any>} */
+            this._lastJoinAtByGuid.has(record.guid)) {
+              /** @type {Map<string, any>} */
               this._lastJoinAtByGuid.set(record.guid, this._joinAtIso(record) || "");
             }
           }
@@ -9281,6 +9667,7 @@ ${recovered}`;
         this._toast("Unable to load meeting records", this._errorMessage(err));
       }
     }
+    /** @param {any} record */
     _joinAtIso(record) {
       const prop = this._prop(record, this._mappedFieldId(FIELDS.JOIN_AT));
       if (!prop) return null;
@@ -9296,6 +9683,10 @@ ${recovered}`;
       const date = new Date(raw);
       return Number.isNaN(date.getTime()) ? raw : date.toISOString();
     }
+    /**
+     * @param {any} record
+     * @param {any} field
+     */
     _text(record, field) {
       try {
         const prop = this._prop(record, field);
@@ -9305,6 +9696,11 @@ ${recovered}`;
         return "";
       }
     }
+    /**
+     * @param {any} record
+     * @param {any} field
+     * @param {any} value
+     */
     _setField(record, field, value) {
       try {
         const prop = this._prop(record, field);
@@ -9313,9 +9709,18 @@ ${recovered}`;
         this._toast("Unable to update meeting record", `${field}: ${this._errorMessage(err)}`);
       }
     }
+    /**
+     * @param {any} record
+     * @param {any} field
+     * @param {any} value
+     */
     _setMappedField(record, field, value) {
       return this._setField(record, this._mappedFieldId(field), value);
     }
+    /**
+     * @param {any} record
+     * @param {any} fieldIdOrLabel
+     */
     _prop(record, fieldIdOrLabel) {
       if (!record || !fieldIdOrLabel) return null;
       let prop = null;
@@ -9341,6 +9746,7 @@ ${recovered}`;
       }
       return null;
     }
+    /** @param {any} prop */
     _propertyText(prop) {
       if (!prop) return "";
       try {
@@ -9395,7 +9801,10 @@ ${recovered}`;
       });
       this._decorateRecordPage(root);
     }
-    /** Both record-page decorations that ride the panel MutationObserver: inline refs + the status-field send button. */
+    /**
+     * Both record-page decorations that ride the panel MutationObserver: inline refs + the status-field send button.
+     * @param {any} root
+     */
     _decorateRecordPage(root) {
       this._decorateInlineRefs(root);
       this._decorateStatusField(root);
@@ -9404,14 +9813,17 @@ ${recovered}`;
      * Structural guids are not real inline references: journal date-group headers
      * ("nest-...") and the open page's own title node both carry a data-guid.
      */
+    /** @param {any} guid */
     _isStructuralGuid(guid) {
       if (!guid) return true;
       if (guid.startsWith("nest-")) return true;
       if (this._activeRecordGuid && guid === this._activeRecordGuid) return true;
       return false;
     }
+    /** @param {any} [root] */
     _decorateInlineRefs(root = this._observedRoot || document.body) {
-      if (!root || !this._recordsByGuid.size) return;
+      if (!root || !/** @type {Map<string, any>} */
+      this._recordsByGuid.size) return;
       const leaves = root.querySelectorAll("span[data-guid]");
       for (const leaf of leaves) {
         if (!(leaf instanceof HTMLElement)) continue;
@@ -9419,7 +9831,8 @@ ${recovered}`;
         if (leaf.closest(INLINE_SKIP_SELECTOR)) continue;
         if (leaf.querySelector("[data-guid]")) continue;
         const guid = leaf.getAttribute("data-guid");
-        if (!guid || !this._recordsByGuid.has(guid)) continue;
+        if (!guid || !/** @type {Map<string, any>} */
+        this._recordsByGuid.has(guid)) continue;
         if (this._isStructuralGuid(guid)) continue;
         const anchor = leaf.closest(INLINE_REF_SELECTOR) || leaf;
         const next = anchor.nextElementSibling;
@@ -9427,7 +9840,10 @@ ${recovered}`;
           anchor.setAttribute(INLINE_APPLIED_ATTR, guid);
           continue;
         }
-        const record = this._recordsByGuid.get(guid);
+        const record = (
+          /** @type {Map<string, any>} */
+          this._recordsByGuid.get(guid)
+        );
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = INLINE_BUTTON_CLASS;
@@ -9440,12 +9856,16 @@ ${recovered}`;
         btn.addEventListener("click", (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
-          void this._startBot(this._recordsByGuid.get(guid));
+          void this._startBot(
+            /** @type {Map<string, any>} */
+            this._recordsByGuid.get(guid)
+          );
         });
         anchor.insertAdjacentElement("afterend", btn);
         anchor.setAttribute(INLINE_APPLIED_ATTR, guid);
       }
     }
+    /** @param {any} record */
     _recordTitle(record) {
       return this._text(record, FIELDS.TITLE) || "this meeting";
     }
@@ -9464,7 +9884,8 @@ ${recovered}`;
           killSwitch: {
             on: !this._disabled,
             onToggle: /* @__PURE__ */ __name((nextOn) => {
-              void this._settingsStore.setDisabled(!nextOn);
+              void /** @type {any} */
+              this._settingsStore.setDisabled(!nextOn);
             }, "onToggle")
           },
           feedback: { data: this.data }
@@ -9487,13 +9908,16 @@ ${recovered}`;
         ...this._renderActiveTab(draft)
       ]));
     }
-    /** The section(s) for the active tab. Sections are non-collapsible — the TAB is the collapse now. */
+    /**
+     * The section(s) for the active tab. Sections are non-collapsible — the TAB is the collapse now.
+     * @param {any} draft
+     */
     _renderActiveTab(draft) {
       switch (this._activeTab) {
         case "connection":
           return this._tabConnection(draft);
         case "fields":
-          return this._tabFieldMapping(draft);
+          return this._tabFieldMapping();
         case "transcripts":
           return this._tabTranscripts(draft);
         case "summary":
@@ -9502,7 +9926,7 @@ ${recovered}`;
           return this._tabCosts();
         case "setup":
         default:
-          return this._tabSetup(draft);
+          return this._tabSetup();
       }
     }
     _tabSetup() {
@@ -9545,7 +9969,10 @@ ${recovered}`;
               `${formatEstimatedUsd(recall.recordingUsd)} recording + ${formatEstimatedUsd(recall.transcriptionUsd)} transcription \xB7 Waiting-room time counts.`
             ),
             ...CLAUDE_MODELS.map(([model, label]) => {
-              const estimate = estimateClaudeSummaryCost(model);
+              const estimate = (
+                /** @type {any} */
+                estimateClaudeSummaryCost(model)
+              );
               return row(
                 label.split(" \u2014 ")[0],
                 `~${formatEstimatedUsd(estimate.totalUsd)} / meeting hour`,
@@ -9610,7 +10037,11 @@ ${recovered}`;
     _setupDoctorStorageKey() {
       let workspace = "";
       try {
-        workspace = (this.getWorkspaceGuid ? this.getWorkspaceGuid() : "") || "";
+        workspace = /** @type {any} */
+        (this.getWorkspaceGuid ? (
+          /** @type {any} */
+          this.getWorkspaceGuid()
+        ) : "") || "";
       } catch {
       }
       let collection = "";
@@ -9636,6 +10067,7 @@ ${recovered}`;
         return null;
       }
     }
+    /** @param {any} state */
     _saveSetupDoctorState(state) {
       try {
         localStorage.setItem(this._setupDoctorStorageKey(), JSON.stringify(state));
@@ -9754,6 +10186,7 @@ ${recovered}`;
         })
       ];
     }
+    /** @param {any} draft */
     _tabConnection(draft) {
       return [
         section({
@@ -9817,6 +10250,7 @@ ${recovered}`;
         })
       ];
     }
+    /** @param {any} draft */
     _tabTranscripts(draft) {
       const enabled = draft.saveTranscript !== false;
       return [
@@ -9884,6 +10318,7 @@ ${recovered}`;
         ] : []
       ];
     }
+    /** @param {any} draft */
     _tabSummary(draft) {
       const enabled = !!draft.autoSummarize;
       return [
@@ -9942,7 +10377,10 @@ ${recovered}`;
       ];
     }
     _bridgeWorkerUrl() {
-      const conf = this.getConfiguration ? this.getConfiguration() : {};
+      const conf = this.getConfiguration ? this.getConfiguration() : (
+        /** @type {any} */
+        {}
+      );
       const repo = String(conf && conf.repository || "https://github.com/akaready/thymer-recall-ai").replace(/\/+$/, "");
       return `${repo}/tree/main/backend`;
     }
@@ -9957,6 +10395,10 @@ ${recovered}`;
       const s = this._draft || this._settings || {};
       return !!(String(s.recallApiKey || "").trim() && String(s.anthropicApiKey || "").trim() && String(s.bridgeUrl || "").trim());
     }
+    /**
+     * @param {any} value
+     * @param {any} copyButton
+     */
     async _copySetupValue(value, copyButton) {
       const text = String(value || "");
       let copied = false;
@@ -10072,6 +10514,13 @@ ${recovered}`;
         )
       );
     }
+    /**
+     * @param {string} label
+     * @param {string} key
+     * @param {string} [placeholder]
+     * @param {boolean} [password]
+     * @param {string} [hint]
+     */
     _textInput(label, key, placeholder = "", password = false, hint = "") {
       const attrs = {
         type: password ? "password" : "text",
@@ -10095,6 +10544,11 @@ ${recovered}`;
      * row (including "Remove") reopen the file picker, the same trap that bites stepper buttons.
      * The native <input type="file"> is hidden and driven by our own button, because "Choose File /
      * No file chosen" is the browser's chrome, not ours, and cannot be styled.
+     */
+    /**
+     * @param {string} label
+     * @param {string} dataKey
+     * @param {string} nameKey
      */
     _fileInput(label, dataKey, nameKey) {
       const filename = this._draft[nameKey] || "";
@@ -10138,6 +10592,11 @@ ${recovered}`;
         body
       );
     }
+    /**
+     * @param {any} file
+     * @param {string} dataKey
+     * @param {string} nameKey
+     */
     async _setBotImageFile(file, dataKey, nameKey) {
       if (!file) return;
       if (!/jpe?g/i.test(file.type || file.name || "")) {
@@ -10153,8 +10612,17 @@ ${recovered}`;
       this._updateSetting(dataKey, b64);
       this._updateSetting(nameKey, file.name || "bot-image.jpg", { rerender: true });
     }
+    /**
+     * @param {string} label
+     * @param {string} key
+     * @param {number} min
+     * @param {number} max
+     */
     _numberInput(label, key, min, max) {
-      const current = /* @__PURE__ */ __name(() => Number(this._draft[key] || DEFAULT_SETTINGS[key]), "current");
+      const current = /* @__PURE__ */ __name(() => Number(this._draft[key] || DEFAULT_SETTINGS[
+        /** @type {keyof typeof DEFAULT_SETTINGS} */
+        key
+      ]), "current");
       const clamp = /* @__PURE__ */ __name((value) => Math.max(min, Math.min(max, Math.round(Number.isFinite(value) ? value : current()))), "clamp");
       const apply = /* @__PURE__ */ __name((input, value) => {
         const next = clamp(value);
@@ -10182,8 +10650,17 @@ ${recovered}`;
         })
       );
     }
+    /**
+     * @param {string} label
+     * @param {string} key
+     * @param {any} options
+     * @param {{onChange?: any, hint?: string}} [opts]
+     */
     _selectInput(label, key, options, { onChange, hint } = {}) {
-      const current = this._draft[key] || DEFAULT_SETTINGS[key];
+      const current = this._draft[key] || DEFAULT_SETTINGS[
+        /** @type {keyof typeof DEFAULT_SETTINGS} */
+        key
+      ];
       return h(
         "label",
         { class: `${ROOT_CLASS}-field` },
@@ -10191,12 +10668,21 @@ ${recovered}`;
         h("select", {
           value: current,
           onChange: /* @__PURE__ */ __name((event) => onChange ? onChange(event.target.value) : this._updateSetting(key, event.target.value, { rerender: true }), "onChange")
-        }, ...options.map(([value, optionLabel]) => h("option", { value, selected: current === value }, optionLabel))),
+        }, .../** @type {[string, string][]} */
+        options.map(([value, optionLabel]) => h("option", { value, selected: current === value }, optionLabel))),
         hint ? h("span", { class: `${ROOT_CLASS}-field-hint` }, hint) : null
       );
     }
+    /**
+     * @param {string} label
+     * @param {string} key
+     * @param {any} groups
+     */
     _groupedSelectInput(label, key, groups) {
-      const current = this._draft[key] || DEFAULT_SETTINGS[key];
+      const current = this._draft[key] || DEFAULT_SETTINGS[
+        /** @type {keyof typeof DEFAULT_SETTINGS} */
+        key
+      ];
       return h(
         "label",
         { class: `${ROOT_CLASS}-field` },
@@ -10211,6 +10697,10 @@ ${recovered}`;
         )))
       );
     }
+    /**
+     * @param {string} label
+     * @param {string} key
+     */
     _modelSelectInput(label, key) {
       const options = CLAUDE_MODELS.map(([value, text]) => [value, text]);
       const current = String(this._draft[key] || DEFAULT_SETTINGS.anthropicModel).trim();
@@ -10227,6 +10717,7 @@ ${recovered}`;
      * It is created under its CANONICAL id, so Auto-detect picks it up with no mapping to set.
      * `saveConfiguration` reloads the plugin; the panel re-mounts itself in `onLoad`.
      */
+    /** @param {any} canonicalId */
     async _createCollectionField(canonicalId) {
       return queuePluginConfigWrite(this, () => this._createCollectionFieldNow(canonicalId));
     }
@@ -10258,6 +10749,12 @@ ${recovered}`;
         this._toast(`Could not add "${def.label}"`, this._errorMessage(err));
       }
     }
+    /**
+     * @param {string} label
+     * @param {string} key
+     * @param {any} types
+     * @param {{filter?: any, emptyTypeLabel?: string}} [opts]
+     */
     _fieldSelectInput(label, key, types, { filter, emptyTypeLabel } = {}) {
       const allowed = new Set((types || []).map((type) => String(type).toLowerCase()));
       const fields = this._collectionFields().filter((field) => {
@@ -10270,7 +10767,10 @@ ${recovered}`;
       }
       const current = this._draft[key] || "";
       if (current && !options.some(([value]) => value === current)) options.push([current, current]);
-      const canonical = CANONICAL_FIELD_FOR_SETTING[key] || "";
+      const canonical = CANONICAL_FIELD_FOR_SETTING[
+        /** @type {keyof typeof CANONICAL_FIELD_FOR_SETTING} */
+        key
+      ] || "";
       const def = canonical ? FIELD_DEFS[canonical] : null;
       const missing = !!def && !this._fieldById(canonical);
       if (missing) options.push([CREATE_FIELD_OPTION, `Create a "${def.label}" property\u2026`]);
@@ -10286,6 +10786,12 @@ ${recovered}`;
         hint: missing && !fields.length ? `This collection has no ${emptyTypeLabel || (types || []).join(" or ")} property for Recall.ai to use. Create one above.` : ""
       });
     }
+    /**
+     * @param {string} label
+     * @param {string} key
+     * @param {number} [rows]
+     * @param {string} [placeholder]
+     */
     _textareaInput(label, key, rows = 4, placeholder = "") {
       return h(
         "label",
@@ -10299,18 +10805,30 @@ ${recovered}`;
         })
       );
     }
+    /**
+     * @param {string} title
+     * @param {string} message
+     */
     _toast(title, message) {
       try {
         this.ui.addToaster({ title, message, dismissible: true, autoDestroyTime: 5e3 });
       } catch {
       }
     }
+    /**
+     * @param {string} message
+     * @param {any} [data]
+     */
     _log(message, data = {}) {
       try {
         console.info(`[Meetings] ${message}`, data);
       } catch {
       }
     }
+    /**
+     * @param {string} label
+     * @param {any} fn
+     */
     _safe(label, fn) {
       try {
         return fn();
@@ -10319,6 +10837,10 @@ ${recovered}`;
         return null;
       }
     }
+    /**
+     * @param {string} label
+     * @param {any} fn
+     */
     async _safeAsync(label, fn) {
       try {
         return await fn();
@@ -10327,6 +10849,7 @@ ${recovered}`;
         return null;
       }
     }
+    /** @param {any} err */
     _errorMessage(err) {
       const message = err && err.message ? err.message : String(err);
       if (/failed to fetch/i.test(message) && !this._bridgeUrl()) {
@@ -10892,7 +11415,10 @@ ${recovered}`;
       const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1e3 : Math.min(8e3, 500 * 2 ** attempt);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    return lastResponse;
+    return (
+      /** @type {Response} */
+      lastResponse
+    );
   }
   __name(fetchWithBackoff, "fetchWithBackoff");
   function transcriptEntries(raw) {
@@ -11058,7 +11584,10 @@ ${recovered}`;
     }
     if (typeof value === "object") {
       for (const key of ["detail", "message", "error"]) {
-        const nested = errorDetail(value[key]);
+        const nested = (
+          /** @type {string} */
+          errorDetail(value[key])
+        );
         if (nested) return nested;
       }
       try {
