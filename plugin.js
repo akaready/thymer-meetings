@@ -5419,7 +5419,7 @@ ${text}`;
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "1.23.11";
+  var PLUGIN_VERSION = "1.23.12";
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
     "append-only-realtime",
@@ -9270,10 +9270,9 @@ ${recovered}`;
      * @param {string} kind
      */
     async _refreshJoinButtonVisibility(record, kind) {
-      const liveKinds = /* @__PURE__ */ new Set(["recording", "scheduled", "processing", "cancelling", "summarizing"]);
       let hide = false;
       try {
-        hide = !liveKinds.has(kind) && await this._recordHasTranscriptContent(record);
+        hide = (kind === "done" || kind === "repair") && await this._recordHasTranscriptContent(record);
       } catch {
         hide = false;
       }
@@ -9589,7 +9588,8 @@ ${recovered}`;
     }
     /**
      * React to Date being set, changed, or cleared on a Meetings record.
-     * Future Dates book immediately. Past / too-soon Dates toast Join Now instead of failing silent.
+     * Far-out Dates book a scheduled bot. Too-soon (but future) Dates convert to an immediate Join Now
+     * when auto-schedule is on, else toast. Past Dates always toast instead of failing silent.
      * @param {any} record
      */
     async _handleMeetingDateUpdate(record) {
@@ -9624,9 +9624,18 @@ ${recovered}`;
       }
       const blocked = scheduleBlockReason(this._joinAtMs(record));
       if (blocked) {
+        if (blocked === "too_soon" && this._settings.autoSchedule && !this._text(record, FIELDS.BOT_ID)) {
+          await this._startBot(
+            /** @type {any} */
+            record,
+            { immediate: true }
+          );
+          return;
+        }
+        const leadMinutes = Math.round((SCHEDULED_LEAD_MS + BOT_JOIN_LEAD_MS) / 6e4);
         this._toast(
           "Join Now needed",
-          blocked === "past" ? "This Date is in the past. Click Join Now to send the notetaker immediately." : "This Date is too soon for a scheduled bot. Click Join Now to send the notetaker immediately."
+          blocked === "past" ? "This Date is in the past. Click Join Now to send the notetaker immediately." : `Scheduled bots need a Date at least ${leadMinutes} minutes out. Click Join Now to send the notetaker immediately.`
         );
         return;
       }
