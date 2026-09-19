@@ -1502,6 +1502,81 @@ var plugins = (() => {
   white-space: nowrap;
 }
 
+/* \u2500\u2500 Keyboard shortcut rows (keyRow) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
+
+.tps-key-name { min-width: 0; }
+
+.tps-key-desc {
+  font-size: var(--tps-fs-hint);
+  color: var(--tps-text-muted);
+  white-space: normal;
+}
+
+.tps-key-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tps-space-1);
+}
+
+.tps-key-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 110px;
+  height: var(--tps-control-h-sm);
+  padding: 0 var(--tps-space-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  font-size: var(--tps-fs-button);
+  color: var(--tps-text);
+  background: var(--tps-bg-input);
+  border: 1px solid var(--tps-divider);
+  border-radius: var(--tps-radius-sm);
+  cursor: pointer;
+  transition: border-color var(--tps-dur-fast) var(--tps-ease-out),
+              background-color var(--tps-dur-fast) var(--tps-ease-out),
+              color var(--tps-dur-fast) var(--tps-ease-out);
+}
+
+.tps-key-chip:hover { border-color: var(--tps-border); }
+
+.tps-key-chip--unbound { color: var(--tps-text-faint); font-style: italic; }
+
+.tps-key-chip[data-capturing="true"] {
+  background: var(--tps-accent-soft);
+  border-color: var(--tps-accent);
+  color: var(--tps-accent);
+  outline: 2px solid var(--tps-accent);
+  outline-offset: 2px;
+}
+
+.tps-key-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tps-control-h-sm);
+  height: var(--tps-control-h-sm);
+  padding: 0;
+  font-size: var(--tps-fs-button);
+  line-height: 1;
+  color: var(--tps-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--tps-radius-sm);
+  cursor: pointer;
+}
+
+.tps-key-clear:hover {
+  color: var(--tps-text);
+  background: var(--tps-bg-hover);
+  border-color: var(--tps-divider);
+}
+
+.tps-key-chip:focus-visible,
+.tps-key-clear:focus-visible {
+  outline: 2px solid var(--tps-accent);
+  outline-offset: 2px;
+}
+
 /* \u2500\u2500 Tabs / segmented control \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */
 
 .tps-tabs {
@@ -4800,7 +4875,6 @@ ${text}`;
     return false;
   }
   __name(copyTextToClipboard, "copyTextToClipboard");
-  var NAV_TIP_CLASS = "plg-recall-ai__nav-tip";
   var HOVER_BOUND = "overlayHoverBound";
   function overlayHoverStyles(kind = "ghost") {
     if (kind === "save" || kind === "primary") {
@@ -4881,58 +4955,6 @@ ${text}`;
     return root;
   }
   __name(mountOverlaySurface, "mountOverlaySurface");
-  function escapeHtmlAttr(text) {
-    return String(text || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-  __name(escapeHtmlAttr, "escapeHtmlAttr");
-  function iconNavHtmlLabel(text) {
-    const safe = escapeHtmlAttr(text);
-    return `<span class="${NAV_TIP_CLASS} tooltip" title="${safe}" aria-label="${safe}" data-tooltip="${safe}" data-tooltip-dir="top" data-tps-tip="${safe}"></span>`;
-  }
-  __name(iconNavHtmlLabel, "iconNavHtmlLabel");
-  function navTipCss() {
-    return [
-      `.panel-menubar :is(button,.button-minimal,[role="button"]):has(.${NAV_TIP_CLASS}){position:relative}`,
-      `.${NAV_TIP_CLASS}{position:absolute;inset:0;z-index:1}`
-    ].join("");
-  }
-  __name(navTipCss, "navTipCss");
-  function navButtonElement(button2) {
-    if (!button2) return null;
-    try {
-      if (typeof button2.getElement === "function") {
-        const el2 = button2.getElement();
-        if (el2) return el2;
-      }
-    } catch {
-    }
-    if (button2.element) return button2.element;
-    return null;
-  }
-  __name(navButtonElement, "navButtonElement");
-  function stampNavTooltip(el2, text) {
-    if (!el2 || !text || typeof el2.setAttribute !== "function") return el2;
-    el2.setAttribute("title", text);
-    el2.setAttribute("aria-label", text);
-    el2.setAttribute("data-tooltip", text);
-    el2.setAttribute("data-tooltip-dir", "top");
-    el2.setAttribute("data-tps-tip", text);
-    if (el2.classList && !el2.classList.contains("tooltip")) el2.classList.add("tooltip");
-    return el2;
-  }
-  __name(stampNavTooltip, "stampNavTooltip");
-  function bindNavTooltip(button2, text) {
-    const label = String(text || "");
-    if (!button2 || !label) return false;
-    try {
-      if (typeof button2.setTooltip === "function") button2.setTooltip(label);
-    } catch {
-    }
-    const el2 = navButtonElement(button2);
-    if (el2) stampNavTooltip(el2, label);
-    return true;
-  }
-  __name(bindNavTooltip, "bindNavTooltip");
 
   // participant-confirm-drafts.js
   function draftsFromUnmatched(participants) {
@@ -5419,7 +5441,7 @@ ${text}`;
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "1.23.12";
+  var PLUGIN_VERSION = "1.23.13";
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
     "append-only-realtime",
@@ -5755,7 +5777,6 @@ ${text}`;
       this._safe("inject css", () => {
         this.ui.injectCSS(PANEL_CSS);
         this.ui.injectCSS(this._css());
-        this._ensureNavTipCss();
         try {
           installInstantTooltip();
         } catch {
@@ -5850,39 +5871,25 @@ ${text}`;
       this._navButton = this._createJoinButton();
       this._regenerateButton = this.addCollectionNavigationButton({
         label: "",
-        htmlLabel: iconNavHtmlLabel("Regenerate"),
         icon: "refresh",
         tooltip: "Regenerate",
         onlyWhenExpanded: true,
-        onClick: /* @__PURE__ */ __name(({ record, element }) => {
-          this._stampIconNavFromClick(element, "Regenerate");
-          void this._openRegenerateMenu(record);
-        }, "onClick")
+        onClick: /* @__PURE__ */ __name(({ record }) => void this._openRegenerateMenu(record), "onClick")
       });
       this._syncButton = this.addCollectionNavigationButton({
         label: "",
-        htmlLabel: iconNavHtmlLabel("Repair"),
         icon: "hammer",
         tooltip: "Repair",
         onlyWhenExpanded: true,
-        onClick: /* @__PURE__ */ __name(({ record, element }) => {
-          this._stampIconNavFromClick(element, "Repair");
-          void this._confirmRepairMeeting(record);
-        }, "onClick")
+        onClick: /* @__PURE__ */ __name(({ record }) => void this._confirmRepairMeeting(record), "onClick")
       });
       this._diagnosticsButton = this.addCollectionNavigationButton({
         label: "",
-        htmlLabel: iconNavHtmlLabel("Diagnostics"),
         icon: "stethoscope",
         tooltip: "Diagnostics",
         onlyWhenExpanded: true,
-        onClick: /* @__PURE__ */ __name(({ record, element }) => {
-          this._stampIconNavFromClick(element, "Diagnostics");
-          void this._showMeetingDiagnostics(record);
-        }, "onClick")
+        onClick: /* @__PURE__ */ __name(({ record }) => void this._showMeetingDiagnostics(record), "onClick")
       });
-      this._bindIconNavTooltips();
-      this._scheduleIconNavTipStamp();
     }
     _createJoinButton() {
       return this.addCollectionNavigationButton({
@@ -9165,7 +9172,6 @@ ${recovered}`;
       } catch {
       }
       void this._refreshJoinButtonVisibility(target, state.kind);
-      this._bindIconNavTooltips();
       if (!this._navButton) return;
       try {
         this._navButton.setIcon(state.icon || "microphone");
@@ -9178,63 +9184,6 @@ ${recovered}`;
       try {
         this._navButton.setTooltip("");
       } catch {
-      }
-    }
-    _ensureNavTipCss() {
-      if (typeof document === "undefined") return;
-      const id = "plg-recall-ai-nav-tip-css";
-      if (document.getElementById(id)) return;
-      const style = document.createElement("style");
-      style.id = id;
-      style.textContent = navTipCss();
-      (document.head || document.documentElement).appendChild(style);
-    }
-    _bindIconNavTooltips() {
-      bindNavTooltip(this._regenerateButton, "Regenerate");
-      bindNavTooltip(this._syncButton, "Repair");
-      bindNavTooltip(this._diagnosticsButton, "Diagnostics");
-      this._stampIconNavTipsInDom();
-    }
-    /**
-     * @param {any} element
-     * @param {string} text
-     */
-    _stampIconNavFromClick(element, text) {
-      if (element) stampNavTooltip(element, text);
-      this._bindIconNavTooltips();
-    }
-    _stampIconNavTipsInDom() {
-      if (typeof document === "undefined") return;
-      try {
-        for (const tip of document.querySelectorAll(".plg-recall-ai__nav-tip")) {
-          const label = tip.getAttribute("data-tooltip") || tip.getAttribute("title") || "";
-          if (!label) continue;
-          stampNavTooltip(
-            /** @type {HTMLElement} */
-            tip,
-            label
-          );
-          const btn = tip.closest('button, .button-minimal, [role="button"]');
-          if (btn) stampNavTooltip(
-            /** @type {HTMLElement} */
-            btn,
-            label
-          );
-        }
-      } catch {
-      }
-    }
-    _scheduleIconNavTipStamp() {
-      const run = /* @__PURE__ */ __name(() => this._bindIconNavTooltips(), "run");
-      try {
-        run();
-      } catch {
-      }
-      for (const ms of [0, 50, 200, 600]) {
-        try {
-          setTimeout(run, ms);
-        } catch {
-        }
       }
     }
     /** @param {any} record */
@@ -10935,16 +10884,6 @@ ${recovered}`;
 				background: color-mix(in srgb, var(--tps-text, currentColor) 12%, transparent);
 				outline: 2px solid color-mix(in srgb, var(--tps-text, currentColor) 45%, transparent);
 				outline-offset: 1px;
-			}
-			/* Icon-only nav hit-area. Also injected on document.head \u2014 injectCSS may not
-			   restyle the host menubar. No extra glyph in this span. */
-			.panel-menubar :is(button, .button-minimal, [role="button"]):has(.${ROOT_CLASS}__nav-tip) {
-				position: relative;
-			}
-			.${ROOT_CLASS}__nav-tip {
-				position: absolute;
-				inset: 0;
-				z-index: 1;
 			}
 			/* Icon is a direct child of the nav button now (no wrapper) \u2014 space it from the text the way
 			   Thymer's own view buttons do, with an inline margin rather than a flex gap. */
