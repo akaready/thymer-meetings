@@ -2791,6 +2791,58 @@ ${report}
     }
   }
   __name(syncPluginVersionOnLoadNow, "syncPluginVersionOnLoadNow");
+  async function healPluginIdentity(plugin, identity) {
+    return queuePluginConfigWrite(plugin, () => healPluginIdentityNow(plugin, identity));
+  }
+  __name(healPluginIdentity, "healPluginIdentity");
+  async function healPluginIdentityNow(plugin, identity) {
+    if (!identity || typeof identity.name !== "string" || !identity.name.trim()) return;
+    const STUB_NAMES = ["New Global Plugin", "New Collection", "My Global Plugin"];
+    const api = await resolveConfigApi(plugin);
+    if (!api) return;
+    let conf = {};
+    try {
+      conf = api.getConfiguration?.() || plugin.getConfiguration?.() || {};
+    } catch {
+      return;
+    }
+    if (conf.ver === void 0 && conf.custom === void 0) return;
+    const hasStubName = typeof conf.name !== "string" || !conf.name.trim() || STUB_NAMES.includes(conf.name.trim());
+    const staleRepo = !!identity.sourceRepo && Array.isArray(identity.legacySourceRepos) && identity.legacySourceRepos.includes(
+      /** @type {string} */
+      conf.__source_repo
+    );
+    const missingRepo = !!identity.sourceRepo && (conf.__source_repo === void 0 || staleRepo);
+    if (!hasStubName && !missingRepo) return;
+    try {
+      let ws = "default";
+      try {
+        ws = plugin.getWorkspaceGuid?.() || "default";
+      } catch {
+      }
+      const guardKey = `tps-identity-healed/${ws}/${identity.name}`;
+      if (sessionStorage.getItem(guardKey) === "1") return;
+      sessionStorage.setItem(guardKey, "1");
+    } catch {
+    }
+    const next = { ...conf };
+    if (hasStubName) {
+      next.name = identity.name;
+      if (identity.icon) next.icon = identity.icon;
+      if (identity.description) next.description = identity.description;
+    }
+    if (missingRepo) {
+      next.__source_repo = identity.sourceRepo;
+      if (conf.__source_files === void 0 && identity.sourceFiles) {
+        next.__source_files = { ...identity.sourceFiles };
+      }
+    }
+    try {
+      await api.saveConfiguration(next);
+    } catch {
+    }
+  }
+  __name(healPluginIdentityNow, "healPluginIdentityNow");
 
   // ../../shared/plugin-kill-switch.js
   var MARKER_SYNC_HORIZON_MS = 9e4;
@@ -4820,7 +4872,7 @@ ${text}`;
   __name(formatMeetingWhen, "formatMeetingWhen");
 
   // confirm-dialog-helpers.js
-  var MEETINGS_GITHUB_REPO = "https://github.com/akaready/thymer-recall-ai";
+  var MEETINGS_GITHUB_REPO = "https://github.com/akaready/thymer-meetings";
   var GITHUB_ISSUE_URL_MAX = 7e3;
   function normalizeConfirmBody(body) {
     if (body && typeof body === "object") {
@@ -5001,7 +5053,7 @@ ${text}`;
   __name(closeParticipantConfirmDialog, "closeParticipantConfirmDialog");
   function openParticipantConfirmDialog(options) {
     closeParticipantConfirmDialog();
-    const rootClass = options.rootClass || "plg-recall-ai";
+    const rootClass = options.rootClass || "plg-meetings";
     const drafts = draftsFromUnmatched(options.participants);
     if (!drafts.length) {
       options.onSkip?.();
@@ -5177,7 +5229,7 @@ ${text}`;
   __name(attachOverlayChrome, "attachOverlayChrome");
   function openConfirmDialog(options) {
     closeConfirmDialog(false);
-    const rootClass = options.rootClass || "plg-recall-ai";
+    const rootClass = options.rootClass || "plg-meetings";
     const title = String(options.title || "Confirm");
     const confirmLabel = options.confirmLabel || "Apply";
     const cancelLabel = options.cancelLabel || "Cancel";
@@ -5221,7 +5273,7 @@ ${text}`;
   __name(openConfirmDialog, "openConfirmDialog");
   function openChoiceApplyDialog(options) {
     closeConfirmDialog(null);
-    const rootClass = options.rootClass || "plg-recall-ai";
+    const rootClass = options.rootClass || "plg-meetings";
     const title = String(options.title || "Choose");
     const items = Array.isArray(options.items) ? options.items : [];
     const confirmLabel = options.confirmLabel || "Apply";
@@ -5316,7 +5368,7 @@ ${text}`;
   __name(openChoiceApplyDialog, "openChoiceApplyDialog");
   function openReportDialog(options) {
     closeConfirmDialog(null);
-    const rootClass = options.rootClass || "plg-recall-ai";
+    const rootClass = options.rootClass || "plg-meetings";
     const title = String(options.title || "Diagnostics");
     const report = String(options.report || "");
     const issueTitle = String(options.issueTitle || "Meetings diagnostics");
@@ -5441,7 +5493,7 @@ ${text}`;
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "1.23.13";
+  var PLUGIN_VERSION = "1.24.0";
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
     "append-only-realtime",
@@ -5479,7 +5531,7 @@ ${text}`;
     relatedFieldId: FIELDS.RELATED
   });
   var CREATE_FIELD_OPTION = "__create__";
-  var ROOT_CLASS = "plg-recall-ai";
+  var ROOT_CLASS = "plg-meetings";
   var PANEL_TYPE = "recall-ai-settings";
   var CONFIG_KEY = "recallAi";
   var SECRETS_CONFIG_KEY = "recallAiSecrets";
@@ -5758,10 +5810,16 @@ ${text}`;
       __name(this, "Plugin");
     }
     onLoad() {
-      pingInstall("recall-ai");
-      pingActive("recall-ai");
+      pingInstall("meetings");
+      pingActive("meetings");
       this._configReady = this._safeAsync("sync plugin version and collection schema", async () => {
         await syncPluginVersionOnLoad(this, PLUGIN_VERSION);
+        await healPluginIdentity(this, {
+          name: "Meetings",
+          sourceRepo: "https://github.com/akaready/thymer-meetings",
+          legacySourceRepos: ["https://github.com/akaready/thymer-recall-ai"],
+          sourceFiles: { branch: "main", json: "plugin.json", js: "plugin.js" }
+        });
         await this._migrateCollectionSchema();
       });
       this._disabled = readKillSwitch(this);
@@ -5786,7 +5844,7 @@ ${text}`;
       this._safe("attach settings lifecycle", () => this._registerSettingsLifecycle());
       this._safe("load workspace collections", () => void this._loadWorkspaceCollections());
       this._safe("heal mounted panel", () => {
-        const staleRoot = document.querySelector(".plg-recall-ai-panel");
+        const staleRoot = document.querySelector(".plg-meetings-panel");
         if (staleRoot && staleRoot.parentElement) {
           this._panelEl = staleRoot.parentElement;
           this._renderPanel();
@@ -9381,7 +9439,7 @@ ${recovered}`;
           meetingStatus: this._text(record, FIELDS.STATUS),
           debug
         });
-        console.info("[recall-ai] meeting diagnostics\n" + report);
+        console.info("[meetings] meeting diagnostics\n" + report);
         await openReportDialog({
           rootClass: ROOT_CLASS,
           title: "Diagnostics",
@@ -10339,7 +10397,7 @@ ${recovered}`;
         /** @type {any} */
         {}
       );
-      const repo = String(conf && conf.repository || "https://github.com/akaready/thymer-recall-ai").replace(/\/+$/, "");
+      const repo = String(conf && conf.repository || "https://github.com/akaready/thymer-meetings").replace(/\/+$/, "");
       return `${repo}/tree/main/backend`;
     }
     /** Recall API keys are issued per region, so the link has to follow the Region setting. */
