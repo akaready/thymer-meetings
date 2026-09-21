@@ -5793,7 +5793,7 @@ class Plugin extends CollectionPlugin {
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "2.0.18";
+  var PLUGIN_VERSION = "2.0.19";
   var DEV_TOOLS = true;
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
@@ -6143,6 +6143,7 @@ class Plugin extends CollectionPlugin {
       this._commandItem = null;
       this._actionCommands = [];
       this._managed = /* @__PURE__ */ new Map();
+      this._collectionCodeCache = /* @__PURE__ */ new Map();
       this._recordCollection = /* @__PURE__ */ new Map();
       this._selectedCollectionGuid = "";
       this._importDraft = "";
@@ -6222,6 +6223,7 @@ class Plugin extends CollectionPlugin {
         }
       }
       this._managed = next;
+      void this._primeCollectionCodes();
       return next;
     }
     /** The bindings map as stored on THIS plugin's config. */
@@ -10630,14 +10632,48 @@ ${recovered}`;
       );
     }
     /** @param {string} collectionGuid */
-    _collectionCode(collectionGuid) {
-      const api = this._managedApi(collectionGuid) || this._collectionByGuid(collectionGuid);
+    /**
+     * `getExistingCodeAndConfig` is typed synchronous but is awaited by every plugin that calls it on
+     * a foreign collection, so treat a promise as a possibility everywhere.
+     * @param {any} api
+     */
+    async _readExistingCodeAndConfig(api) {
       try {
-        const existing = api && api.getExistingCodeAndConfig ? api.getExistingCodeAndConfig() : null;
-        return String(existing && existing.code || "");
+        let existing = api && typeof api.getExistingCodeAndConfig === "function" ? api.getExistingCodeAndConfig() : null;
+        if (existing && typeof existing.then === "function") existing = await existing;
+        return existing && typeof existing === "object" ? existing : null;
       } catch {
-        return "";
+        return null;
       }
+    }
+    /** Read every managed collection's code into the cache; re-render when something changed. */
+    async _primeCollectionCodes() {
+      const managed = (
+        /** @type {Map<string, any>} */
+        this._managed || /* @__PURE__ */ new Map()
+      );
+      const cache = (
+        /** @type {Map<string, string>} */
+        this._collectionCodeCache || (this._collectionCodeCache = /* @__PURE__ */ new Map())
+      );
+      let changed = false;
+      for (const [guid, entry] of managed) {
+        const existing = await this._readExistingCodeAndConfig(entry.api);
+        const code = String(existing && existing.code || "");
+        if (cache.get(guid) !== code) {
+          cache.set(guid, code);
+          changed = true;
+        }
+      }
+      if (changed && this._panelEl && document.contains(this._panelEl)) this._renderPanel();
+    }
+    /** @param {string} collectionGuid */
+    _collectionCode(collectionGuid) {
+      const cache = (
+        /** @type {Map<string, string>} */
+        this._collectionCodeCache || /* @__PURE__ */ new Map()
+      );
+      return cache.get(collectionGuid) || "";
     }
     /**
      * Replace a retired Meetings collection's code with a stub.
@@ -10671,7 +10707,7 @@ ${recovered}`;
       if (!confirmed) return false;
       return queuePluginConfigWrite(api, async () => {
         try {
-          const existing = api.getExistingCodeAndConfig ? api.getExistingCodeAndConfig() : null;
+          const existing = await this._readExistingCodeAndConfig(api);
           const code = String(existing && existing.code || "");
           if (!code.trim()) return this._toast("Nothing to clear", `${name} has no collection code.`);
           const stub = composeStubCode(code);
