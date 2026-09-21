@@ -131,7 +131,7 @@
 		"views": false,
 		"sidebar": true
 	},
-	"version": "1.24.0",
+	"version": "1.25.0",
 	"__source_repo": "https://github.com/akaready/thymer-meetings",
 	"__source_files": {
 		"branch": "main",

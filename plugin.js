@@ -5435,6 +5435,36 @@ ${text}`;
   }
   __name(openReportDialog, "openReportDialog");
 
+  // settings-transfer.js
+  var EXPORT_FORMAT = "meetings-settings";
+  var EXPORT_MAPPING_KEYS = Object.freeze([
+    "meetingUrlFieldId",
+    "joinAtFieldId",
+    "attendeesFieldId",
+    "relatedFieldId",
+    "participantNamesFieldId"
+  ]);
+  function buildSettingsExport({ conf, userGuid, version, collectionGuid, settings, prefsKey = "recallAi", secretsKey = "recallAiSecrets" }) {
+    const custom = conf && typeof conf === "object" && conf.custom && typeof conf.custom === "object" ? conf.custom : {};
+    const prefs = custom[prefsKey] && typeof custom[prefsKey] === "object" ? custom[prefsKey] : null;
+    const slots = custom[secretsKey] && typeof custom[secretsKey] === "object" ? custom[secretsKey] : null;
+    const secrets = userGuid && slots && slots[userGuid] && typeof slots[userGuid] === "object" ? slots[userGuid] : null;
+    const mapping = {};
+    for (const key of EXPORT_MAPPING_KEYS) mapping[key] = String(settings && settings[key] || "");
+    return {
+      format: EXPORT_FORMAT,
+      version: String(version || ""),
+      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      collectionGuid: String(collectionGuid || ""),
+      userGuid: String(userGuid || ""),
+      prefs,
+      secrets,
+      mapping,
+      autoSchedule: !!(settings && settings.autoSchedule)
+    };
+  }
+  __name(buildSettingsExport, "buildSettingsExport");
+
   // ../../shared/settings-ui/tooltip.js
   var TIP_SELECTOR = "[data-tps-tip],[data-cf-tip]";
   var STYLE_ID = "tps-tip-css";
@@ -5493,7 +5523,8 @@ ${text}`;
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "1.24.0";
+  var PLUGIN_VERSION = "1.25.0";
+  var DEV_TOOLS = true;
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
     "append-only-realtime",
@@ -9959,8 +9990,41 @@ ${recovered}`;
           ]
         }),
         this._setupDoctorSection(),
-        this._healDiagnosticsSection()
+        this._healDiagnosticsSection(),
+        DEV_TOOLS ? this._settingsExportSection() : null
       ];
+    }
+    /** Dev-only: the JSON the 2.x Import button consumes (settings, this user's keys, field mapping). */
+    _settingsExportSection() {
+      const json = JSON.stringify(buildSettingsExport({
+        conf: this.getConfiguration ? this.getConfiguration() : {},
+        userGuid: this._currentUserGuid(),
+        version: PLUGIN_VERSION,
+        collectionGuid: this._selfGuid(),
+        settings: this._settings
+      }), null, 2);
+      return section({
+        label: "Export settings (dev)",
+        hint: "Copy this JSON before installing Meetings 2.0 as a global plugin; its Import button restores settings, keys, and field mapping. Contains your API keys \u2014 keep it private.",
+        body: [
+          h(
+            "label",
+            { class: `${ROOT_CLASS}-field` },
+            h("span", { class: `${ROOT_CLASS}-field-label` }, "Settings JSON"),
+            h("textarea", { rows: 8, readonly: true, value: json })
+          ),
+          h(
+            "div",
+            { class: `${ROOT_CLASS}-field` },
+            button({
+              label: "Copy settings JSON",
+              variant: "ghost",
+              size: "md",
+              onClick: /* @__PURE__ */ __name(() => void copyTextToClipboard(json).then((ok) => this._toast(ok ? "Copied" : "Copy failed", ok ? "Settings JSON is in the clipboard." : "Select the text and copy it by hand.")), "onClick")
+            })
+          )
+        ]
+      });
     }
     _tabCosts() {
       const recall = estimateRecallCost(60);
