@@ -5793,7 +5793,7 @@ class Plugin extends CollectionPlugin {
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "2.0.19";
+  var PLUGIN_VERSION = "2.0.20";
   var DEV_TOOLS = true;
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
@@ -10612,9 +10612,19 @@ ${recovered}`;
      */
     _clearOldCodeControl(collectionGuid) {
       const code = this._collectionCode(collectionGuid);
-      if (!code) return null;
+      if (!code) {
+        void this._primeCollectionCodes();
+        return h("span", { class: `${ROOT_CLASS}-meta` }, "Old code check: collection code not read yet (or empty).");
+      }
       const classified = classifyCollectionCode(code);
-      if (classified.kind !== "owner" || !/plg-(meetings|recall-ai)/.test(code)) return null;
+      const isMeetings = /plg-(meetings|recall-ai)/.test(code);
+      if (classified.kind !== "owner" || !isMeetings) {
+        return h(
+          "span",
+          { class: `${ROOT_CLASS}-meta` },
+          `Old code check: ${code.length.toLocaleString()} chars, kind "${classified.kind}"${classified.occupant ? ` (${classified.occupant})` : ""}, ${isMeetings ? "Meetings bundle" : "not a Meetings bundle"} \u2014 nothing to clear.`
+        );
+      }
       return h(
         "div",
         { class: `${ROOT_CLASS}-field` },
