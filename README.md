@@ -28,7 +28,6 @@ Enjoy! 🙏
 
 Installing creates **no collection**. Open **Plugin: Meetings → Collections** and either **create a Meetings collection** (the full schema, ready to go) or **add an existing collection** you want meetings run on. Nothing happens anywhere until you do.
 
-> **Upgrading from 1.x?** 1.x was a collection plugin. 2.0 is global, so it installs alongside rather than over the old one: install it, restore your settings, then use **Clear old plugin code** on the old collection's row to retire the 1.x copy. Your records, transcripts, and summaries are never touched.
 
 &nbsp;
 
@@ -120,7 +119,7 @@ Every new record in a **Meetings collection** starts with four headings: **Summa
 Open **Plugin: Meetings** from the command palette. There is no Save button: edits apply and persist immediately (API keys save when you leave the field). Preferences sync across your devices through the workspace's end-to-end-encrypted plugin configuration. The scope pill in the header shows whether this device follows the shared settings or has its own edits, with push and discard controls.
 
 ### Setup
-Guided steps, **Setup Doctor** (which now reports per managed collection), and **Diagnostics** (see Maintenance below).
+Guided steps and **Setup Doctor**, which reports per managed collection.
 
 ### Connection
 | Setting | What it does |
@@ -172,7 +171,6 @@ Three command-palette actions work on whichever meeting record you have open.
 
 Each refuses politely if the open record is not in a collection Meetings manages.
 
-Two more tools live in **Setup → Diagnostics** only: **Heal mashed summaries** across every managed collection, and **Apply heading format**, which relabels, resizes, and reorders the four section headings and inserts any missing one — on collections Meetings owns only, never on a hosted calendar's events.
 
 > **Kill switch:** the toggle in the settings-panel header disables the whole plugin, including transcript polling. A meeting recorded while it was off won't stream into Thymer until you re-enable it and run **Repair**.
 
