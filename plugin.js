@@ -5788,7 +5788,7 @@ class Plugin extends CollectionPlugin {
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "2.0.16";
+  var PLUGIN_VERSION = "2.0.17";
   var DEV_TOOLS = true;
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
@@ -10469,7 +10469,24 @@ ${recovered}`;
         conf = null;
       }
       if (!conf || !conf.custom || !conf.custom[CONFIG_KEY]) return this._toast("Could not import", "That collection carries no Meetings settings.");
-      return this._importSettings(buildLegacyCollectionExport({ conf, userGuid: this._currentUserGuid(), version: PLUGIN_VERSION, collectionGuid }));
+      const imported = buildLegacyCollectionExport({ conf, userGuid: this._currentUserGuid(), version: PLUGIN_VERSION, collectionGuid });
+      try {
+        let workspace = "";
+        try {
+          workspace = this.getWorkspaceGuid ? this.getWorkspaceGuid() || "" : "";
+        } catch {
+        }
+        const raw = localStorage.getItem(`recall-ai/${workspace || "default"}/${collectionGuid}/secrets`);
+        const local = raw ? normalizeSecrets(JSON.parse(raw)) : null;
+        if (local) {
+          const slot = imported.secrets && typeof imported.secrets === "object" ? { ...imported.secrets } : {};
+          const localKeys = { recallApiKey: local.recallApiKey || "", anthropicApiKey: local.anthropicApiKey || "" };
+          for (const k of ["recallApiKey", "anthropicApiKey"]) if (!slot[k] && localKeys[k]) slot[k] = localKeys[k];
+          if (slot.recallApiKey || slot.anthropicApiKey) imported.secrets = slot;
+        }
+      } catch {
+      }
+      return this._importSettings(imported);
     }
     /** @param {any} [importedArg] a ready export object; omitted → parse the pasted JSON draft */
     async _importSettings(importedArg) {
@@ -10485,6 +10502,16 @@ ${recovered}`;
         bindingsKey: BINDINGS_CONFIG_KEY
       }));
       if (!ok) return this._toast("Could not import", "Thymer did not hand over a writable config handle.");
+      try {
+        this._settingsStore.recover(settingsFromLegacyBag(imported.prefs));
+      } catch {
+      }
+      if (imported.secrets) {
+        try {
+          this._mirrorKeysLocally(imported.secrets);
+        } catch {
+        }
+      }
       this._importDraft = "";
       this._selectedCollectionGuid = imported.collectionGuid;
       this._savePanelPlace();
@@ -10492,6 +10519,74 @@ ${recovered}`;
       this._toast("Settings imported", `${this._collectionName(imported.collectionGuid)} is now a Meetings collection. Clear its old plugin code next.`);
       if (this._panelEl && document.contains(this._panelEl)) this._renderPanel();
       return true;
+    }
+    /**
+     * Dev-only: put the Meetings properties back on an OWNED collection whose field definitions were
+     * stripped — a Plugins Manager "update" that wrote the 2.0 manifest (which has no fields) into the
+     * old collection does exactly that. Property VALUES survive in the records; only the definitions
+     * go, and they come back under their original ids, so every value reattaches.
+     * @param {string} collectionGuid
+     */
+    _restoreSchemaControl(collectionGuid) {
+      const binding = this._bindings()[collectionGuid];
+      if (!binding || binding.role !== "owned") return null;
+      const api = this._managedApi(collectionGuid) || this._collectionByGuid(collectionGuid);
+      let conf = (
+        /** @type {any} */
+        null
+      );
+      try {
+        conf = api ? api.getConfiguration() : null;
+      } catch {
+        conf = null;
+      }
+      if (!conf) return null;
+      const have = new Set((Array.isArray(conf.fields) ? conf.fields : []).map((f) => String(f && f.id || "")));
+      const missing = MEETINGS_COLLECTION_TEMPLATE.fields.filter((f) => !have.has(f.id));
+      const noViews = !Array.isArray(conf.views) || !conf.views.length;
+      if (!missing.length && !noViews) return null;
+      return h(
+        "div",
+        { class: `${ROOT_CLASS}-field` },
+        button({
+          label: `Restore Meetings schema (${missing.length} missing propert${missing.length === 1 ? "y" : "ies"}${noViews ? ", no views" : ""})`,
+          variant: "primary",
+          size: "md",
+          onClick: /* @__PURE__ */ __name(() => void this._restoreCollectionSchema(collectionGuid), "onClick")
+        }),
+        h("span", { class: `${ROOT_CLASS}-field-hint` }, "Adds the missing Meetings properties and table view under their original ids. Existing values reattach.")
+      );
+    }
+    /** @param {string} collectionGuid */
+    async _restoreCollectionSchema(collectionGuid) {
+      const api = this._managedApi(collectionGuid) || this._collectionByGuid(collectionGuid);
+      if (!api || typeof api.saveConfiguration !== "function") return this._toast("Could not restore", "Thymer did not hand over a writable handle for that collection.");
+      return queuePluginConfigWrite(api, async () => {
+        try {
+          const live = JSON.parse(JSON.stringify(api.getConfiguration?.() || {}));
+          live.fields = Array.isArray(live.fields) ? live.fields : [];
+          const have = new Set(live.fields.map((f) => String(f && f.id || "")));
+          let added = 0;
+          for (const def of MEETINGS_COLLECTION_TEMPLATE.fields) {
+            if (have.has(def.id)) continue;
+            live.fields.push({ ...def });
+            added += 1;
+          }
+          if (!Array.isArray(live.views) || !live.views.length) live.views = JSON.parse(JSON.stringify(MEETINGS_COLLECTION_TEMPLATE.views));
+          const page = new Set(Array.isArray(live.page_field_ids) ? live.page_field_ids : []);
+          live.page_field_ids = [...Array.isArray(live.page_field_ids) ? live.page_field_ids : [], ...MEETINGS_COLLECTION_TEMPLATE.page_field_ids.filter((id) => !page.has(id))];
+          if (!live.item_name) live.item_name = MEETINGS_COLLECTION_TEMPLATE.item_name;
+          const ok = await api.saveConfiguration(live);
+          if (ok === false) throw new Error("Thymer rejected the change.");
+          this._toast("Schema restored", `${added} propert${added === 1 ? "y" : "ies"} added back to ${this._collectionName(collectionGuid)}.`);
+          await this._loadManaged();
+          if (this._panelEl && document.contains(this._panelEl)) this._renderPanel();
+          return true;
+        } catch (err) {
+          this._toast("Could not restore", this._errorMessage(err));
+          return false;
+        }
+      });
     }
     /**
      * Dev-only: the button that retires the 1.x CollectionPlugin still running beside this one.
@@ -11101,7 +11196,7 @@ ${recovered}`;
             checked: !!binding.autoSchedule,
             onChange: /* @__PURE__ */ __name((event) => void this._saveBinding(guid, { autoSchedule: !!event.target.checked }), "onChange")
           }),
-          ...DEV_TOOLS ? [this._clearOldCodeControl(guid)] : []
+          ...DEV_TOOLS ? [this._clearOldCodeControl(guid), this._restoreSchemaControl(guid)] : []
         ].filter(Boolean)
       });
     }
