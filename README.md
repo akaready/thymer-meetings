@@ -1,6 +1,8 @@
 # Meetings
 
-Collection plugin that sends a [Recall.ai](https://recall.ai) notetaker to the meeting link on a record, streams the transcript into the page while the meeting runs, and writes a Claude summary with action items when it ends. Attendees are matched to your People records.
+Global plugin that sends a [Recall.ai](https://recall.ai) notetaker to the meeting link on a record, streams the transcript into the page while the meeting runs, and writes a Claude summary with action items when it ends. Attendees are matched to your People records.
+
+It manages **any number of collections**: one it can create for you, and ones you already have — a calendar plugin's **Events** collection, for example. Point it at the property holding the meeting link and it works there too.
 
 Plugins are made with 🤍 for the Thymer community. Free to use, fork, and hack on for <a href="LICENSE" target="_blank" rel="noopener noreferrer">non-commercial use</a>.
 
@@ -22,9 +24,11 @@ Enjoy! 🙏
 
 **Recommended:** Use the [Thymer Plugins Manager](https://github.com/ahpatel/thymer-plugins-manager) and install via [this repo's URL](https://github.com/akaready/thymer-meetings) for automatic updates.
 
-**Manual:** copy <a href="plugin.js" target="_blank" rel="noopener noreferrer"><code>plugin.js</code></a> and <a href="plugin.json" target="_blank" rel="noopener noreferrer"><code>plugin.json</code></a> from this repo into Thymer's plugin editor.
+**Manual:** in Thymer, run **New Plugin** from the command palette and choose a **global** plugin (not a collection), name it `Meetings`, then paste <a href="plugin.js" target="_blank" rel="noopener noreferrer"><code>plugin.js</code></a> and <a href="plugin.json" target="_blank" rel="noopener noreferrer"><code>plugin.json</code></a> from this repo into its editor.
 
-Installing creates a **Meetings** collection. The plugin is bound to that collection for good: rename it, add your own properties, use it however you like. If a property the plugin needs goes missing, the **Field Mapping** tab offers to create it.
+Installing creates **no collection**. Open **Plugin: Meetings → Collections** and either **create a Meetings collection** (the full schema, ready to go) or **add an existing collection** you want meetings run on. Nothing happens anywhere until you do.
+
+> **Upgrading from 1.x?** 1.x was a collection plugin. 2.0 is global, so it installs alongside rather than over the old one: install it, restore your settings, then use **Clear old plugin code** on the old collection's row to retire the 1.x copy. Your records, transcripts, and summaries are never touched.
 
 &nbsp;
 
@@ -58,9 +62,26 @@ The **Costs** tab shows a one-hour planning estimate (Recall recording and trans
 
 &nbsp;
 
+## 📚 Collections
+
+Everything Meetings does happens in the collections you list under **Plugin: Meetings → Collections**. There are two kinds.
+
+| | **Meetings collection** (created by the plugin) | **Hosted** (a collection you already have) |
+| --- | --- | --- |
+| Schema | The full Meetings schema, kept up to date | Only `Bot ID`, `Bot Status`, `Last Error` are added |
+| Meeting link | Auto-detected from any url property | **Only** the property you map — nothing is guessed |
+| Page headings | Summary / Action items / Notes / Transcript seeded on every new record | Never seeded |
+| Automatic booking | On by default | **Off** by default |
+
+Hosted mode is deliberately quiet. A calendar collection carries a link to the event's web page on every single row, so guessing would send paid bots to calendar pages; and every future event with a Meet link would book a bot if automatic booking defaulted on. Map **Meeting URL** to the property that really holds the conferencing link — `Location` or a description is fine, the first link in the text is used — and turn automatic booking on if you want it.
+
+Selecting a row opens its field mapping. **Remove** drops the binding only: the collection, its properties, and everything already written stay exactly where they are.
+
+&nbsp;
+
 ## 🎙️ Using it
 
-Add a meeting link to a Meeting record. Optionally set a **Date** (the meeting start, like a calendar event).
+Add a meeting link to a record in a managed collection. Optionally set a **Date** (the meeting start, like a calendar event).
 
 | `Date` | What happens |
 | --- | --- |
@@ -68,13 +89,17 @@ Add a meeting link to a Meeting record. Optionally set a **Date** (the meeting s
 | 12 or more minutes out | The notetaker is **booked** and joins two minutes before the Date. **Join Now** is still there if you want it early. |
 | Less than 12 minutes out | The notetaker is sent **immediately**, because Recall only guarantees punctuality for bots booked 10 or more minutes ahead. |
 
-Booking happens automatically when **Send the bot automatically to scheduled meetings** is on (the default). Turn it off to book by hand. Clicking a **Scheduled** bot cancels it. Clicking a **Recording** bot stops it.
+Booking happens automatically when **Send the bot automatically to scheduled meetings** is on for that collection (default on for a Meetings collection, off for a hosted one). Clicking a **Scheduled** bot cancels it. Clicking a **Recording** bot stops it.
 
-You can also send the notetaker from the **Bot Status** column in the table view, or from the microphone button on an inline reference to a Meeting record.
+Three ways to send the notetaker:
+
+- The button in the **Bot Status** property row on the record page.
+- The microphone button on an inline reference to a meeting record.
+- **Meetings: Join now** in the command palette, on whichever record you have open.
 
 ### What lands on the page
 
-Every new meeting starts with four headings: **Summary**, **Action items**, **Notes**, and **Transcript**. Everything the plugin writes goes into the page body, where headings, tasks, speaker blocks, and citation links render properly. There are no Transcript or Summary text properties.
+Every new record in a **Meetings collection** starts with four headings: **Summary**, **Action items**, **Notes**, and **Transcript**. (Hosted collections are never seeded — the headings appear only where the plugin writes.) Everything the plugin writes goes into the page body, where headings, tasks, speaker blocks, and citation links render properly. There are no Transcript or Summary text properties.
 
 - **Transcript** streams live while the meeting runs, one collapsible block per speaker turn. With **AI topic sections** on, it is regrouped under topic headings when the meeting ends.
 - **Summary** is written when the meeting ends: a short overview, then Decisions and Open Questions. Claims cite the transcript with native Thymer reference chips.
@@ -95,7 +120,7 @@ Every new meeting starts with four headings: **Summary**, **Action items**, **No
 Open **Plugin: Meetings** from the command palette. There is no Save button: edits apply and persist immediately (API keys save when you leave the field). Preferences sync across your devices through the workspace's end-to-end-encrypted plugin configuration. The scope pill in the header shows whether this device follows the shared settings or has its own edits, with push and discard controls.
 
 ### Setup
-Guided steps, **Setup Doctor**, and **Diagnostics** (see Maintenance below).
+Guided steps, **Setup Doctor** (which now reports per managed collection), and **Diagnostics** (see Maintenance below).
 
 ### Connection
 | Setting | What it does |
@@ -105,11 +130,10 @@ Guided steps, **Setup Doctor**, and **Diagnostics** (see Maintenance below).
 | **Recall media retention** | How long future bots keep Recall's audio, video, and transcript artifacts. Defaults to 7 days, inside Recall's free storage window. Does not affect what is already written into Thymer. |
 | **Anthropic API key** / **Claude model** | Key and model used to write the summary. |
 | **Bot name** / **Bot image** / **Join chat message** | How the notetaker appears in the meeting. The image is a public HTTPS JPEG, 16:9, ideally 1280×720 and under 1.3 MB. |
-| **Send the bot automatically to scheduled meetings** | On by default. Book the notetaker whenever a Date is set. |
 | **Poll interval** | How often the plugin checks Recall for progress. Default 30 seconds. |
 
-### Field Mapping
-Point Meeting URL, Date, Attendees, and Related at existing properties instead of the plugin defaults. **Match participants to Attendees** (on by default) controls the roster matching described above.
+### Collections
+Create, add, remove, and map collections (see [Collections](#-collections) above). Field mapping is **per collection**: Meeting URL, Date, Attendees, and Related each point at a property of that collection, and so does its own **Send the bot automatically to scheduled meetings**. **Match participants to Attendees** (on by default) is the one setting here that applies everywhere.
 
 ### Transcripts
 | Setting | What it does |
@@ -140,13 +164,15 @@ The one-hour estimate described in Setup, with the selected model highlighted.
 
 ## 🔧 Maintenance
 
-Three icon buttons sit next to **Join Now** on a Meeting record.
+Three command-palette actions work on whichever meeting record you have open.
 
-- **Regenerate** (refresh icon) opens a menu: rewrite the **Summary** or the **Action items**, after a confirmation. Each leaves the other sections and your Notes alone. It does not send a new bot.
-- **Repair** (hammer icon) re-fetches Recall's final artifacts for a meeting with a Bot ID and fills in only what is **missing**: transcript turns, summary sections, citations, attendee links. It never replaces a healthy summary, edited checkboxes, Notes, or anything the plugin did not write. If a summary landed as one glued blob, Repair also runs **Heal mashed summaries** on it.
-- **Diagnostics** (stethoscope icon) copies a support-ready report to the clipboard: webhook events received, parsed rows, KV state, transcript artifacts, bridge version. It never includes keys, meeting URLs, transcript wording, or account data.
+- **Meetings: Regenerate summary or action items** opens a menu: rewrite the **Summary** or the **Action items**, after a confirmation. Each leaves the other sections and your Notes alone. It does not send a new bot.
+- **Meetings: Repair meeting** re-fetches Recall's final artifacts for a meeting with a Bot ID and fills in only what is **missing**: transcript turns, summary sections, citations, attendee links. It never replaces a healthy summary, edited checkboxes, Notes, or anything the plugin did not write. If a summary landed as one glued blob, Repair also runs **Heal mashed summaries** on it.
+- **Meetings: Diagnostics** copies a support-ready report to the clipboard: webhook events received, parsed rows, KV state, transcript artifacts, bridge version. It never includes keys, meeting URLs, transcript wording, or account data.
 
-Two more tools live in **Setup → Diagnostics** only: **Heal mashed summaries** across all meetings, and **Apply heading format**, which relabels, resizes, and reorders the four section headings on every Meetings record and inserts any missing one.
+Each refuses politely if the open record is not in a collection Meetings manages.
+
+Two more tools live in **Setup → Diagnostics** only: **Heal mashed summaries** across every managed collection, and **Apply heading format**, which relabels, resizes, and reorders the four section headings and inserts any missing one — on collections Meetings owns only, never on a hosted calendar's events.
 
 > **Kill switch:** the toggle in the settings-panel header disables the whole plugin, including transcript polling. A meeting recorded while it was off won't stream into Thymer until you re-enable it and run **Repair**.
 

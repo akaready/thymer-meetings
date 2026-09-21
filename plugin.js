@@ -3727,13 +3727,6 @@ ${report}
     return raw ? String(raw) : "";
   }
   __name(recordCollectionGuid, "recordCollectionGuid");
-  function isOwnedMeetingRecord(record, collectionGuid, indexedGuids = null) {
-    if (!record || !record.guid || !collectionGuid) return false;
-    const recColl = recordCollectionGuid(record);
-    if (recColl) return recColl === String(collectionGuid);
-    return !!(indexedGuids && typeof indexedGuids.has === "function" && indexedGuids.has(record.guid));
-  }
-  __name(isOwnedMeetingRecord, "isOwnedMeetingRecord");
   function lineItemPlainText(line) {
     if (!line) return "";
     const segs = Array.isArray(line.segments) ? line.segments : [];
@@ -4705,6 +4698,198 @@ ${text}`;
   }
   __name(migrateMeetingSchema, "migrateMeetingSchema");
 
+  // collection-template.js
+  var FIELDS = Object.freeze({
+    TITLE: "title",
+    MEETING_URL: "meeting_url",
+    JOIN_AT: "join_at",
+    PARTICIPANT_NAMES: "participant_names",
+    ATTENDEES: "attendees",
+    RELATED: "related",
+    BOT_ID: "recall_bot_id",
+    STATUS: "recall_status",
+    LAST_ERROR: "last_error"
+  });
+  var TITLE_FIELD_DEFINITION = Object.freeze({ id: FIELDS.TITLE, label: "Title", type: "text", icon: "ti-abc", many: false, read_only: false, active: true });
+  var FIELD_DEFS = Object.freeze({
+    [FIELDS.MEETING_URL]: { id: FIELDS.MEETING_URL, label: "Meeting URL", type: "url", icon: "ti-link", many: false, read_only: false, active: true },
+    [FIELDS.JOIN_AT]: { id: FIELDS.JOIN_AT, label: "Date", type: "datetime", icon: "ti-calendar", many: false, read_only: false, active: true },
+    [FIELDS.PARTICIPANT_NAMES]: { id: FIELDS.PARTICIPANT_NAMES, label: "Participant Names", type: "text", icon: "ti-users", many: false, read_only: false, active: false },
+    [FIELDS.ATTENDEES]: ATTENDEES_FIELD_DEFINITION,
+    [FIELDS.RELATED]: RELATED_FIELD_DEFINITION,
+    [FIELDS.BOT_ID]: { id: FIELDS.BOT_ID, label: "Bot ID", type: "text", icon: "ti-robot", many: false, read_only: false, active: true },
+    [FIELDS.STATUS]: { id: FIELDS.STATUS, label: "Bot Status", type: "text", icon: "ti-activity", many: false, read_only: false, active: true },
+    [FIELDS.LAST_ERROR]: { id: FIELDS.LAST_ERROR, label: "Last Error", type: "text", icon: "ti-alert-triangle", many: false, read_only: false, active: true }
+  });
+  var HOSTED_FIELD_IDS = Object.freeze([FIELDS.BOT_ID, FIELDS.STATUS, FIELDS.LAST_ERROR]);
+  var MEETINGS_COLLECTION_TEMPLATE = Object.freeze({
+    name: "Meetings",
+    item_name: "Meeting",
+    icon: "microphone",
+    description: "Send Recall.ai bots to meeting URLs and stream transcripts and summaries into Thymer.",
+    fields: [
+      { ...TITLE_FIELD_DEFINITION },
+      { ...FIELD_DEFS[FIELDS.MEETING_URL] },
+      { ...FIELD_DEFS[FIELDS.JOIN_AT] },
+      { ...FIELD_DEFS[FIELDS.PARTICIPANT_NAMES] },
+      { ...FIELD_DEFS[FIELDS.ATTENDEES] },
+      { ...FIELD_DEFS[FIELDS.RELATED] },
+      { ...FIELD_DEFS[FIELDS.BOT_ID] },
+      { ...FIELD_DEFS[FIELDS.STATUS] },
+      { ...FIELD_DEFS[FIELDS.LAST_ERROR] }
+    ],
+    views: [
+      {
+        id: "table",
+        label: "Meetings",
+        description: "Recall.ai meeting bot control table.",
+        type: "table",
+        icon: "ti-table",
+        shown: true,
+        read_only: false,
+        sort_field_id: FIELDS.JOIN_AT,
+        sort_dir: "desc",
+        group_by_field_id: null,
+        field_ids: [FIELDS.TITLE, FIELDS.MEETING_URL, FIELDS.JOIN_AT, FIELDS.STATUS, FIELDS.BOT_ID, FIELDS.ATTENDEES, FIELDS.RELATED],
+        query: ""
+      }
+    ],
+    page_field_ids: [FIELDS.TITLE, FIELDS.MEETING_URL, FIELDS.JOIN_AT, FIELDS.ATTENDEES, FIELDS.RELATED, FIELDS.BOT_ID, FIELDS.STATUS, FIELDS.LAST_ERROR],
+    managed: { fields: false, views: false, sidebar: true }
+  });
+
+  // bindings.js
+  var BINDING_MAPPING_KEYS = Object.freeze([
+    "meetingUrlFieldId",
+    "joinAtFieldId",
+    "attendeesFieldId",
+    "relatedFieldId",
+    "participantNamesFieldId"
+  ]);
+  var BINDING_ROLES = Object.freeze(["owned", "hosted"]);
+  function normalizeBinding(raw) {
+    const src = raw && typeof raw === "object" ? raw : {};
+    const role = src.role === "owned" ? "owned" : "hosted";
+    const str = /* @__PURE__ */ __name((key) => typeof src[key] === "string" ? src[key].trim() : "", "str");
+    return {
+      role,
+      enabled: typeof src.enabled === "boolean" ? src.enabled : true,
+      autoSchedule: typeof src.autoSchedule === "boolean" ? src.autoSchedule : role === "owned",
+      meetingUrlFieldId: str("meetingUrlFieldId"),
+      joinAtFieldId: str("joinAtFieldId"),
+      attendeesFieldId: str("attendeesFieldId"),
+      relatedFieldId: str("relatedFieldId"),
+      participantNamesFieldId: str("participantNamesFieldId")
+    };
+  }
+  __name(normalizeBinding, "normalizeBinding");
+  function normalizeBindings(raw) {
+    const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    const out = {};
+    for (const guid of Object.keys(src).sort()) {
+      const key = String(guid || "").trim();
+      if (!key) continue;
+      out[key] = normalizeBinding(src[guid]);
+    }
+    return out;
+  }
+  __name(normalizeBindings, "normalizeBindings");
+  function newBinding(role) {
+    return normalizeBinding({ role: role === "owned" ? "owned" : "hosted" });
+  }
+  __name(newBinding, "newBinding");
+
+  // meeting-url.js
+  var TRAILING_JUNK = /[.,;:!?'"»)\]}>]+$/;
+  function extractMeetingUrl(text) {
+    const match = String(text == null ? "" : text).match(/https?:\/\/\S+/i);
+    if (!match) return "";
+    const url = match[0].replace(TRAILING_JUNK, "");
+    return /^https?:\/\/[^/\s]/i.test(url) ? url : "";
+  }
+  __name(extractMeetingUrl, "extractMeetingUrl");
+
+  // ../../shared/collection-code.js
+  var ANY_PATCH_BLOCK = /\/\* (.+?): managed collection hook - begin \*\/[\s\S]*?\/\* \1: managed collection hook - end \*\//g;
+  function extractPatchBlocks(code) {
+    const out = [];
+    const text = String(code || "");
+    for (const m of text.matchAll(ANY_PATCH_BLOCK)) out.push({ name: m[1], text: m[0] });
+    return out;
+  }
+  __name(extractPatchBlocks, "extractPatchBlocks");
+  function stripAllPatchBlocks(code) {
+    return String(code || "").replace(ANY_PATCH_BLOCK, "").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  __name(stripAllPatchBlocks, "stripAllPatchBlocks");
+  function classifyCollectionCode(code) {
+    const text = String(code || "");
+    const blocks = extractPatchBlocks(text);
+    const rest = stripCodeCommentsAndStrings(stripAllPatchBlocks(text));
+    const hasOwnerLogic = OWNER_SIGNALS.some((sig) => rest.includes(sig));
+    if (hasOwnerLogic) return { kind: "owner", patches: blocks, occupant: attributeOccupant(text) };
+    return { kind: blocks.length ? "patched" : "blank", patches: blocks, occupant: "" };
+  }
+  __name(classifyCollectionCode, "classifyCollectionCode");
+  var OWNER_SIGNALS = Object.freeze([
+    "customizeRecordTitle",
+    "customizeSidebarItems",
+    "setSidebarWidget",
+    "addCollectionNavigationButton",
+    "this.properties",
+    "this.views",
+    "this.collection",
+    "this.events",
+    "this.data",
+    "this.ws",
+    "localStorage",
+    "fetch",
+    "savePlugin",
+    "saveConfiguration",
+    "previewPlugin",
+    "insertFromMarkdown",
+    "createRecord",
+    "createLineItem",
+    "prop(",
+    "setName"
+  ]);
+  var KNOWN_OCCUPANTS = Object.freeze([
+    ["plg-meetings", "Meetings"],
+    ["plg-recall-ai", "Meetings (pre-1.24 bundle)"],
+    ["plg-collection-icons", "Collection Icons"],
+    ["Build Title from Properties", "Build Title from Properties"]
+  ]);
+  function attributeOccupant(code) {
+    const text = String(code || "");
+    const hit = KNOWN_OCCUPANTS.find(([needle]) => text.includes(needle));
+    return hit ? hit[1] : "another plugin";
+  }
+  __name(attributeOccupant, "attributeOccupant");
+  function stripCodeCommentsAndStrings(code) {
+    return String(code || "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "").replace(/'(?:\\.|[^'\\])*'/g, "''").replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/`(?:\\.|[^`\\])*`/g, "``");
+  }
+  __name(stripCodeCommentsAndStrings, "stripCodeCommentsAndStrings");
+  var STUB_MARKER = "/* thymer-collection-stub */";
+  var STUB_OWNER_CLASS = `${STUB_MARKER}
+class Plugin extends CollectionPlugin {
+	onLoad() {}
+	onUnload() {}
+}`;
+  function assertCodeSafe(code) {
+    const text = String(code || "");
+    try {
+      new Function(text);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { ok: false, reason: `would not parse \u2014 ${message}` };
+    }
+    if (!/\bclass\s+Plugin\b|\bvar\s+Plugin\s*=|\bPlugin\s*=\s*class\b/.test(text)) {
+      return { ok: false, reason: "declares no Plugin class \u2014 the collection would not load" };
+    }
+    return { ok: true };
+  }
+  __name(assertCodeSafe, "assertCodeSafe");
+
   // time-formatting.js
   var TRANSCRIPT_TIMESTAMP_GROUPS = Object.freeze([
     Object.freeze({
@@ -5464,6 +5649,86 @@ ${text}`;
     };
   }
   __name(buildSettingsExport, "buildSettingsExport");
+  function settingsFromLegacyBag(bag) {
+    if (!bag || typeof bag !== "object") return {};
+    if (bag.shared && typeof bag.shared === "object") {
+      const devices = bag.byDevice && typeof bag.byDevice === "object" ? Object.values(bag.byDevice) : [];
+      const first = devices.find((slot) => slot && typeof slot === "object") || {};
+      return { ...first, ...bag.shared };
+    }
+    return { ...bag };
+  }
+  __name(settingsFromLegacyBag, "settingsFromLegacyBag");
+  function buildLegacyCollectionExport({ conf, userGuid, version, collectionGuid }) {
+    const custom = conf && typeof conf === "object" && conf.custom && typeof conf.custom === "object" ? conf.custom : {};
+    return buildSettingsExport({ conf, userGuid, version, collectionGuid, settings: settingsFromLegacyBag(custom.recallAi) });
+  }
+  __name(buildLegacyCollectionExport, "buildLegacyCollectionExport");
+  function parseSettingsImport(text) {
+    const raw = String(text == null ? "" : text).trim();
+    if (!raw) return { error: "Paste the JSON exported from Meetings 1.25 first." };
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      return { error: `Not valid JSON \u2014 ${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { error: "Expected a JSON object." };
+    if (parsed.format !== EXPORT_FORMAT) return { error: `Expected "format": "${EXPORT_FORMAT}".` };
+    const collectionGuid = String(parsed.collectionGuid || "").trim();
+    if (!collectionGuid) return { error: "The export carries no collectionGuid, so there is nothing to bind." };
+    const mapping = {};
+    const rawMapping = parsed.mapping && typeof parsed.mapping === "object" ? parsed.mapping : {};
+    for (const key of EXPORT_MAPPING_KEYS) mapping[key] = String(rawMapping[key] || "").trim();
+    return {
+      format: EXPORT_FORMAT,
+      version: String(parsed.version || ""),
+      collectionGuid,
+      userGuid: String(parsed.userGuid || "").trim(),
+      prefs: parsed.prefs && typeof parsed.prefs === "object" ? parsed.prefs : null,
+      secrets: parsed.secrets && typeof parsed.secrets === "object" ? parsed.secrets : null,
+      mapping,
+      autoSchedule: !!parsed.autoSchedule
+    };
+  }
+  __name(parseSettingsImport, "parseSettingsImport");
+  function applySettingsImport(custom, imported, userGuid, { prefsKey = "recallAi", secretsKey = "recallAiSecrets", bindingsKey = "recallAiCollections" } = {}) {
+    if (!imported || imported.error) return {};
+    const live = custom && typeof custom === "object" ? custom : {};
+    const patch = {};
+    if (imported.prefs) patch[prefsKey] = imported.prefs;
+    if (imported.secrets && userGuid) {
+      const slots = live[secretsKey] && typeof live[secretsKey] === "object" ? live[secretsKey] : {};
+      const mine = slots[userGuid] && typeof slots[userGuid] === "object" ? slots[userGuid] : {};
+      const merged = { ...mine };
+      for (const key of ["recallApiKey", "anthropicApiKey"]) {
+        const incoming = String(imported.secrets[key] || "");
+        if (incoming && !String(merged[key] || "")) merged[key] = incoming;
+      }
+      patch[secretsKey] = { ...slots, [userGuid]: merged };
+    }
+    const bindings = normalizeBindings(live[bindingsKey]);
+    patch[bindingsKey] = normalizeBindings({
+      ...bindings,
+      [imported.collectionGuid]: {
+        ...bindings[imported.collectionGuid] || {},
+        role: "owned",
+        enabled: true,
+        autoSchedule: imported.autoSchedule,
+        ...imported.mapping
+      }
+    });
+    return patch;
+  }
+  __name(applySettingsImport, "applySettingsImport");
+  function composeStubCode(code) {
+    const patches = extractPatchBlocks(String(code || "")).map((block) => block.text);
+    const next = [STUB_OWNER_CLASS, ...patches].join("\n\n");
+    const safe = assertCodeSafe(next);
+    if (!safe.ok) return { ok: false, reason: safe.reason };
+    return { ok: true, code: next, patches };
+  }
+  __name(composeStubCode, "composeStubCode");
 
   // ../../shared/settings-ui/tooltip.js
   var TIP_SELECTOR = "[data-tps-tip],[data-cf-tip]";
@@ -5523,7 +5788,7 @@ ${text}`;
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "1.25.0";
+  var PLUGIN_VERSION = "2.0.16";
   var DEV_TOOLS = true;
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
@@ -5533,27 +5798,6 @@ ${text}`;
     "parser-diagnostics",
     "scheduled-bot-cancel"
   ]);
-  var FIELDS = Object.freeze({
-    TITLE: "title",
-    MEETING_URL: "meeting_url",
-    JOIN_AT: "join_at",
-    PARTICIPANT_NAMES: "participant_names",
-    ATTENDEES: "attendees",
-    RELATED: "related",
-    BOT_ID: "recall_bot_id",
-    STATUS: "recall_status",
-    LAST_ERROR: "last_error"
-  });
-  var FIELD_DEFS = Object.freeze({
-    [FIELDS.MEETING_URL]: { id: FIELDS.MEETING_URL, label: "Meeting URL", type: "url", icon: "ti-link", many: false, read_only: false, active: true },
-    [FIELDS.JOIN_AT]: { id: FIELDS.JOIN_AT, label: "Date", type: "datetime", icon: "ti-calendar", many: false, read_only: false, active: true },
-    [FIELDS.PARTICIPANT_NAMES]: { id: FIELDS.PARTICIPANT_NAMES, label: "Participant Names", type: "text", icon: "ti-users", many: false, read_only: false, active: false },
-    [FIELDS.ATTENDEES]: ATTENDEES_FIELD_DEFINITION,
-    [FIELDS.RELATED]: RELATED_FIELD_DEFINITION,
-    [FIELDS.BOT_ID]: { id: FIELDS.BOT_ID, label: "Bot ID", type: "text", icon: "ti-robot", many: false, read_only: false, active: true },
-    [FIELDS.STATUS]: { id: FIELDS.STATUS, label: "Bot Status", type: "text", icon: "ti-activity", many: false, read_only: false, active: true },
-    [FIELDS.LAST_ERROR]: { id: FIELDS.LAST_ERROR, label: "Last Error", type: "text", icon: "ti-alert-triangle", many: false, read_only: false, active: true }
-  });
   var CANONICAL_FIELD_FOR_SETTING = Object.freeze({
     meetingUrlFieldId: FIELDS.MEETING_URL,
     joinAtFieldId: FIELDS.JOIN_AT,
@@ -5566,6 +5810,7 @@ ${text}`;
   var PANEL_TYPE = "recall-ai-settings";
   var CONFIG_KEY = "recallAi";
   var SECRETS_CONFIG_KEY = "recallAiSecrets";
+  var BINDINGS_CONFIG_KEY = "recallAiCollections";
   var INLINE_BUTTON_CLASS = `${ROOT_CLASS}__inline-button`;
   var INLINE_APPLIED_ATTR = "data-recall-ai-inline";
   var EDITOR_SCOPE = ".editor-panel";
@@ -5590,11 +5835,6 @@ ${text}`;
     anthropicApiKey: "",
     anthropicModel: "claude-sonnet-4-6",
     bridgeUrl: "",
-    meetingUrlFieldId: "",
-    joinAtFieldId: "",
-    participantNamesFieldId: "",
-    attendeesFieldId: "",
-    relatedFieldId: "",
     mapParticipantNamesToAttendees: true,
     createMissingPeople: false,
     botImageUrl: "",
@@ -5604,7 +5844,6 @@ ${text}`;
     joinChatMessage: "This meeting is being recorded and transcribed.",
     sendJoinChatMessage: true,
     pollSeconds: 30,
-    autoSchedule: true,
     recordingRetention: "168",
     autoSummarize: true,
     transcriptTimestamps: "clock",
@@ -5652,11 +5891,6 @@ ${text}`;
       recallRegion: str("recallRegion"),
       anthropicModel: str("anthropicModel"),
       bridgeUrl: str("bridgeUrl"),
-      meetingUrlFieldId: str("meetingUrlFieldId"),
-      joinAtFieldId: str("joinAtFieldId"),
-      participantNamesFieldId: str("participantNamesFieldId"),
-      attendeesFieldId: str("attendeesFieldId"),
-      relatedFieldId: str("relatedFieldId"),
       mapParticipantNamesToAttendees: typeof src.mapParticipantNamesToAttendees === "boolean" ? src.mapParticipantNamesToAttendees : true,
       createMissingPeople: bool("createMissingPeople"),
       botImageUrl: str("botImageUrl"),
@@ -5666,7 +5900,6 @@ ${text}`;
       joinChatMessage: str("joinChatMessage"),
       sendJoinChatMessage: bool("sendJoinChatMessage"),
       pollSeconds: clampNumber(src.pollSeconds, 10, 300, DEFAULT_SETTINGS.pollSeconds),
-      autoSchedule: bool("autoSchedule"),
       recordingRetention: normalizeRecordingRetention(src.recordingRetention),
       autoSummarize: bool("autoSummarize"),
       transcriptTimestamps: normalizeTranscriptTimestampStyle(src.transcriptTimestamps),
@@ -5836,14 +6069,14 @@ ${text}`;
     }
   }
   __name(pingActive, "pingActive");
-  var Plugin = class extends CollectionPlugin {
+  var Plugin = class extends AppPlugin {
     static {
       __name(this, "Plugin");
     }
     onLoad() {
       pingInstall("meetings");
       pingActive("meetings");
-      this._configReady = this._safeAsync("sync plugin version and collection schema", async () => {
+      this._configReady = this._safeAsync("sync plugin version and managed schemas", async () => {
         await syncPluginVersionOnLoad(this, PLUGIN_VERSION);
         await healPluginIdentity(this, {
           name: "Meetings",
@@ -5851,12 +6084,12 @@ ${text}`;
           legacySourceRepos: ["https://github.com/akaready/thymer-recall-ai"],
           sourceFiles: { branch: "main", json: "plugin.json", js: "plugin.js" }
         });
-        await this._migrateCollectionSchema();
+        await this._loadManaged();
+        await this._migrateOwnedSchemas();
       });
       this._disabled = readKillSwitch(this);
       this._initState();
       this._safe("load settings", () => {
-        this._migrateLegacyLocalSettings();
         this._secrets = this._loadSecrets();
         this._prefs = this._settingsStore.load().settings;
         this._recomputeSettings();
@@ -5872,6 +6105,7 @@ ${text}`;
         }
       });
       this._safe("register settings panel", () => this._registerSettingsPanel());
+      this._safe("register action commands", () => this._registerActionCommands());
       this._safe("attach settings lifecycle", () => this._registerSettingsLifecycle());
       this._safe("load workspace collections", () => void this._loadWorkspaceCollections());
       this._safe("heal mounted panel", () => {
@@ -5886,11 +6120,10 @@ ${text}`;
         this._log("loaded (kill switch off \u2014 effects skipped)");
         return;
       }
-      this._safe("register nav buttons", () => this._registerNavigationButtons());
-      this._safe("register status cell", () => this._registerStatusCellRenderer());
       this._safe("register events", () => this._registerEvents());
       this._safe("attach editor observer", () => this._attachEditorObserver());
       void this._safeAsync("refresh records", async () => {
+        await this._configReady;
         await this._refreshRecordIndex();
         await this._restorePolling();
         this._decorateInlineRefs();
@@ -5903,10 +6136,12 @@ ${text}`;
       this._panelEl = null;
       this._settingsPanel = null;
       this._commandItem = null;
-      this._navButton = null;
-      this._syncButton = null;
-      this._regenerateButton = null;
-      this._diagnosticsButton = null;
+      this._actionCommands = [];
+      this._managed = /* @__PURE__ */ new Map();
+      this._recordCollection = /* @__PURE__ */ new Map();
+      this._selectedCollectionGuid = "";
+      this._importDraft = "";
+      this._createCollectionInFlight = null;
       this._regenerateInFlight = /* @__PURE__ */ new Map();
       this._regenerateActionsInFlight = /* @__PURE__ */ new Map();
       this._healInFlight = null;
@@ -5935,17 +6170,14 @@ ${text}`;
       this._autoScheduled = /* @__PURE__ */ new Set();
       this._lastJoinAtByGuid = /* @__PURE__ */ new Map();
       this._activeRecordGuid = "";
+      this._restorePanelPlace();
       this._settingsStore = createSettingsStore(this, {
         slug: "recall-ai",
         key: CONFIG_KEY,
         // synced blob stays at conf.custom.recallAi
         version: PLUGIN_VERSION,
-        normalize: /* @__PURE__ */ __name((raw) => normalizePrefs(raw), "normalize"),
-        // Per-collection scoping preserved from the legacy key shape.
-        // Return '' (NOT a fallback string) when the collection isn't resolvable
-        // yet — the store supplies the 'collection' sentinel and can then tell a
-        // degraded key from a real one, so a blob written under either is found.
-        scopeKey: /* @__PURE__ */ __name(() => this.collection && this.collection.getGuid ? this.collection.getGuid() : "", "scopeKey")
+        normalize: /* @__PURE__ */ __name((raw) => normalizePrefs(raw), "normalize")
+        // No scopeKey in 2.x: prefs belong to the global plugin, not to any one collection.
       });
       this._prefs = normalizePrefs(null);
       this._secrets = normalizeSecrets(null);
@@ -5956,99 +6188,111 @@ ${text}`;
       this._settings = { ...this._prefs, ...this._secrets };
       this._draft = { ...this._settings };
     }
-    _registerNavigationButtons() {
-      this._navButton = this._createJoinButton();
-      this._regenerateButton = this.addCollectionNavigationButton({
-        label: "",
-        icon: "refresh",
-        tooltip: "Regenerate",
-        onlyWhenExpanded: true,
-        onClick: /* @__PURE__ */ __name(({ record }) => void this._openRegenerateMenu(record), "onClick")
-      });
-      this._syncButton = this.addCollectionNavigationButton({
-        label: "",
-        icon: "hammer",
-        tooltip: "Repair",
-        onlyWhenExpanded: true,
-        onClick: /* @__PURE__ */ __name(({ record }) => void this._confirmRepairMeeting(record), "onClick")
-      });
-      this._diagnosticsButton = this.addCollectionNavigationButton({
-        label: "",
-        icon: "stethoscope",
-        tooltip: "Diagnostics",
-        onlyWhenExpanded: true,
-        onClick: /* @__PURE__ */ __name(({ record }) => void this._showMeetingDiagnostics(record), "onClick")
-      });
-    }
-    _createJoinButton() {
-      return this.addCollectionNavigationButton({
-        label: "Join Now",
-        // One glyph from the icon slot. htmlLabel-with-icon plus Thymer's default view glyph
-        // painted two icons (document + microphone) jammed against "Join Now".
-        // Text label is enough — no tooltip, no custom hover.
-        icon: "microphone",
-        onlyWhenExpanded: true,
-        onClick: /* @__PURE__ */ __name(({ record }) => {
-          this._activeRecordGuid = record && record.guid || "";
-          const kind = this._recordVisualState(record).kind;
-          if (kind === "scheduled") return void this._cancelScheduledBot(record);
-          if (kind === "recording") return void this._stopBot(record);
-          if (kind === "summarizing" || kind === "processing" || kind === "cancelling") {
-            return this._toast("Still working", "The meeting is over and the transcript is being processed. Nothing to do.");
-          }
-          if (kind === "done" || kind === "repair") return void this._confirmRepairMeeting(record);
-          void this._startBot(
-            /** @type {any} */
-            record,
-            { immediate: true }
-          );
-        }, "onClick")
-      });
-    }
     /**
-     * Renders the per-row Transcribe action inside the Recall Status cell.
+     * Every collection Meetings manages, resolved from the bindings map.
      *
-     * properties.render() returns a FRESH element and Thymer owns insertion, so this is
-     * inherently idempotent — unlike decorating host DOM, it cannot duplicate or orphan a
-     * node on re-render. It is also why the button never goes near the row drag handle.
+     * A binding can name a collection that has since been deleted, and the workspace can gain one
+     * Meetings was told about before it existed — so the registry is a JOIN, rebuilt whenever either
+     * side can have moved (load, collection.*, and after any binding save).
      */
-    _registerStatusCellRenderer() {
-      if (!this.properties || !this.properties.render) return;
-      const render = /* @__PURE__ */ __name(({ record, view }) => this._renderStatusCell(record, view), "render");
-      const names = [FIELDS.STATUS];
-      const field = this._fieldById(FIELDS.STATUS);
-      if (field && field.label && field.label !== FIELDS.STATUS) names.push(field.label);
-      for (const name of names) {
+    async _loadManaged() {
+      const next = /* @__PURE__ */ new Map();
+      const bindings = this._bindings();
+      const guids = Object.keys(bindings);
+      if (guids.length) {
+        let collections = [];
         try {
-          this.properties.render(name, render);
+          collections = await this.data.getAllCollections() || [];
         } catch {
+          collections = [];
+        }
+        for (const api of collections) {
+          let guid = "";
+          try {
+            guid = String(api && api.getGuid ? api.getGuid() : "");
+          } catch {
+          }
+          const binding = guid ? bindings[guid] : null;
+          if (binding && binding.enabled) next.set(guid, { api, binding });
         }
       }
+      this._managed = next;
+      return next;
     }
-    /**
-     * @param {any} record
-     * @param {any} view
-     * @returns {HTMLElement|null} null = let Thymer render the property normally.
-     */
-    _renderStatusCell(record, view) {
-      if (!record) return null;
-      if (!view || String(view.type || "").toLowerCase() !== "table") return null;
-      const wrap = document.createElement("span");
-      wrap.className = `${ROOT_CLASS}__cell`;
-      const statusText = this._text(record, FIELDS.STATUS);
-      if (statusText) {
-        const chip = document.createElement("span");
-        chip.className = `${ROOT_CLASS}__cell-status`;
-        chip.textContent = statusLabel(statusText);
-        wrap.appendChild(chip);
+    /** The bindings map as stored on THIS plugin's config. */
+    _bindings() {
+      try {
+        const conf = (
+          /** @type {any} */
+          this.getConfiguration ? this.getConfiguration() : {}
+        );
+        return normalizeBindings(conf && conf.custom ? conf.custom[BINDINGS_CONFIG_KEY] : null);
+      } catch {
+        return normalizeBindings(null);
       }
-      this._appendSendButtons(wrap, record);
-      return wrap;
     }
     /**
-     * One send button wired to _startBot. Shared by the table cell and the record-page property-row
-     * injection so both affordances behave identically. mousedown/click are stopped so a click sends
-     * the bot instead of opening the row / entering the field.
+     * Read-modify-write one binding through the store's atomic custom patch, so a binding edit can
+     * never race a settings flush or a secret-slot write. The save reloads the plugin.
+     *
+     * @param {string} collectionGuid
+     * @param {any} patch pass null to REMOVE the binding
+     */
+    async _saveBinding(collectionGuid, patch) {
+      const guid = String(collectionGuid || "").trim();
+      if (!guid) return false;
+      const ok = await this._settingsStore.saveCustomPatch((custom) => {
+        const current = normalizeBindings(custom[BINDINGS_CONFIG_KEY]);
+        if (patch === null) delete current[guid];
+        else current[guid] = { ...current[guid] || newBinding("hosted"), ...patch };
+        return { [BINDINGS_CONFIG_KEY]: normalizeBindings(current) };
+      });
+      if (!ok) {
+        this._toast("Could not save the collection binding", "Thymer did not hand over a writable config handle.");
+        return false;
+      }
+      await this._loadManaged();
+      if (this._panelEl && document.contains(this._panelEl)) this._renderPanel();
+      return true;
+    }
+    /**
+     * The collection a record belongs to.
+     *
+     * `PluginRecord` has no `getCollection()`, so this is the event's `collectionGuid` (recorded into
+     * `_recordCollection` as events arrive) or the index built from each managed collection's records.
+     * Empty when unknown — never guess, because every write gate hangs off this.
+     *
+     * @param {any} record
+     */
+    _collectionGuidOf(record) {
+      if (!record || !record.guid) return "";
+      const direct = recordCollectionGuid(record);
+      if (direct) return direct;
+      return (
+        /** @type {Map<string, string>} */
+        this._recordCollection.get(record.guid) || ""
+      );
+    }
+    /** @param {any} record */
+    _bindingFor(record) {
+      const entry = (
+        /** @type {Map<string, any>} */
+        this._managed.get(this._collectionGuidOf(record))
+      );
+      return entry ? entry.binding : null;
+    }
+    /** The collection API handle for a managed collection guid. */
+    /** @param {string} collectionGuid */
+    _managedApi(collectionGuid) {
+      const entry = (
+        /** @type {Map<string, any>} */
+        this._managed.get(String(collectionGuid || ""))
+      );
+      return entry ? entry.api : null;
+    }
+    /**
+     * One send button wired to _startBot, injected into the record page's Bot Status property row.
+     * mousedown/click are stopped so a click sends the bot instead of entering the field.
      */
     /**
      * @param {any} record
@@ -6058,7 +6302,7 @@ ${text}`;
      */
     _sendButton(record, icon, label, opts) {
       const btn = this.ui.createButton({ icon, label, onClick: /* @__PURE__ */ __name(() => void this._startBot(record, opts), "onClick") });
-      btn.classList.add(`${ROOT_CLASS}__cell-button`);
+      btn.classList.add(`${ROOT_CLASS}__pagebtn`);
       btn.addEventListener("mousedown", (ev) => ev.stopPropagation());
       btn.addEventListener("click", (ev) => ev.stopPropagation());
       return btn;
@@ -6081,8 +6325,9 @@ ${text}`;
       return true;
     }
     /**
-     * Inject the send button into the Recall Status property row ON THE RECORD PAGE — the one place
-     * properties.render can't reach (it is a view-cell hook). Thymer renders each property as
+     * Inject the send button into the Bot Status property row ON THE RECORD PAGE — the one affordance
+     * a global plugin has, now that there is no collection nav strip and no CollectionPlugin-only
+     * `properties.render` hook for table cells. Thymer renders each property as
      * `.page-props-row[data-field-id=<id>]` with a `.page-prop-val` value cell inside `.page-props-editor`
      * (confirmed via DOM probe). We target the recall_status row's value cell for the panel's active
      * record. Runs synchronously inside the panel MutationObserver; a state signature stops it churning
@@ -6104,6 +6349,10 @@ ${text}`;
         if (!record) return;
         const MARK = `${ROOT_CLASS}__pagebtns`;
         let holder = valCell.querySelector(`.${MARK}`);
+        if (!this._isOurRecord(record)) {
+          if (holder) holder.remove();
+          return;
+        }
         const state = this._recordVisualState(record);
         const sendable = (state.kind === "idle" || state.kind === "schedulable") && !!this._meetingUrl(record);
         if (!sendable) {
@@ -6122,43 +6371,28 @@ ${text}`;
         this._log("status field decorate failed", { error: this._errorMessage(err) });
       }
     }
-    /**
-     * @returns {{kind: 'ours'|'blank'|'conflict', occupant: string}}
-     */
-    /**
-     * This collection's guid.
-     *
-     * NOT `this.getGuid()` — that is an AppPlugin method and does not exist on CollectionPlugin,
-     * so calling it threw `this.getGuid is not a function` and killed the merge outright. The guid
-     * lives on `this.collection`.
-     */
-    _selfGuid() {
+    /** The user-visible name of a collection, for panel rows and toasts. */
+    /** @param {string} guid */
+    _collectionName(guid) {
+      const api = this._managedApi(guid) || this._collectionByGuid(guid);
       try {
-        return (this.collection && this.collection.getGuid ? this.collection.getGuid() : "") || "";
+        const name = api && api.getName ? api.getName() : "";
+        if (name) return String(name);
       } catch {
-        return "";
       }
+      return guid ? `Collection ${String(guid).slice(0, 8)}` : "this collection";
     }
-    /** The collection Recall.ai actually runs in, named as the user sees it in the sidebar. */
-    _selfName() {
-      try {
-        const name = this.collection && this.collection.getName ? this.collection.getName() : "";
-        if (name) return name;
-      } catch {
-      }
-      try {
-        return this.getConfiguration()?.name || "this collection";
-      } catch {
-        return "this collection";
-      }
-    }
-    /** Cache collection API handles for the optional People relation setup. */
+    /**
+     * Cache collection API handles: the Collections tab's "add an existing collection" list, and the
+     * People collection lookup for attendee matching. No self-filter in 2.x — a global plugin is not
+     * a collection, and every collection in the workspace is a candidate.
+     */
     async _loadWorkspaceCollections(force = false) {
       if (this._workspaceCollectionsPromise && !force) return this._workspaceCollectionsPromise;
       const task = (async () => {
         try {
           const list2 = await this.data.getAllCollections();
-          this._workspaceCollections = (Array.isArray(list2) ? list2 : []).filter((collection) => collection && collection.getGuid && collection.getGuid() !== this._selfGuid()).sort((a, b) => String(a.getName ? a.getName() : "").localeCompare(String(b.getName ? b.getName() : "")));
+          this._workspaceCollections = (Array.isArray(list2) ? list2 : []).filter((collection) => collection && collection.getGuid).sort((a, b) => String(a.getName ? a.getName() : "").localeCompare(String(b.getName ? b.getName() : "")));
           this._workspaceCollectionsLoaded = true;
         } catch (err) {
           this._workspaceCollectionsLoaded = true;
@@ -6203,46 +6437,132 @@ ${text}`;
         this._renderPanel();
       });
     }
+    /**
+     * The record the user is looking at, or null. Every palette action works on it — there is no
+     * collection nav strip in a global plugin.
+     */
+    _activeRecord() {
+      try {
+        const panel2 = this.ui.getActivePanel && this.ui.getActivePanel();
+        const record = panel2 && panel2.getActiveRecord ? panel2.getActiveRecord() : null;
+        if (record && record.guid) this._activeRecordGuid = record.guid;
+        return record || null;
+      } catch {
+        return null;
+      }
+    }
+    /**
+     * The four record actions that used to be nav-strip buttons. Join Now also stays as the button
+     * injected into the Bot Status property row; these are the keyboard route to all of them.
+     *
+     * @param {string} label
+     * @param {string} icon
+     * @param {(record: any) => any} run
+     */
+    _addActionCommand(label, icon, run) {
+      const item = this.ui.addCommandPaletteCommand({
+        label,
+        icon,
+        onSelected: /* @__PURE__ */ __name(() => {
+          if (this._disabled) return this._toast("Meetings is off", "Turn the plugin on in Plugin: Meetings to use this.");
+          const record = this._activeRecord();
+          if (!record || !this._isOurRecord(record)) {
+            return this._toast("Open a meeting first", "This record is not in a collection Meetings manages.");
+          }
+          void run(record);
+        }, "onSelected")
+      });
+      /** @type {any[]} */
+      this._actionCommands.push(item);
+      return item;
+    }
+    _registerActionCommands() {
+      this._addActionCommand("Meetings: Join now", "microphone", (record) => this._joinNowAction(record));
+      this._addActionCommand("Meetings: Repair meeting", "hammer", (record) => this._confirmRepairMeeting(record));
+      this._addActionCommand("Meetings: Regenerate summary or action items", "refresh", (record) => this._openRegenerateMenu(record));
+      this._addActionCommand("Meetings: Diagnostics", "stethoscope", (record) => this._showMeetingDiagnostics(record));
+    }
+    /**
+     * One button, one command, one meaning per state — lifted verbatim from the retired Join Now nav
+     * button so the palette and the row button cannot drift apart.
+     * @param {any} record
+     */
+    _joinNowAction(record) {
+      const kind = this._recordVisualState(record).kind;
+      if (kind === "scheduled") return this._cancelScheduledBot(record);
+      if (kind === "recording") return this._stopBot(record);
+      if (kind === "summarizing" || kind === "processing" || kind === "cancelling") {
+        return this._toast("Still working", "The meeting is over and the transcript is being processed. Nothing to do.");
+      }
+      if (kind === "done" || kind === "repair") return this._confirmRepairMeeting(record);
+      return this._startBot(
+        /** @type {any} */
+        record,
+        { immediate: true }
+      );
+    }
     _registerEvents() {
       const on = this.events && this.events.on ? this.events.on.bind(this.events) : null;
       if (!on) return;
+      const ALL = { collection: "*" };
       /** @type {string[]} */
       this._handlerIds.push(on("panel.navigated", () => {
         this._attachEditorObserver();
-        this._updateNavButtonForActiveRecord();
+        this._activeRecord();
       }));
       /** @type {string[]} */
       this._handlerIds.push(on("panel.focused", () => {
         this._attachEditorObserver();
-        this._updateNavButtonForActiveRecord();
+        this._activeRecord();
       }));
       /** @type {string[]} */
       this._handlerIds.push(on("record.created", (ev) => {
+        const collGuid = String(ev && ev.collectionGuid || "");
+        const entry = collGuid ? (
+          /** @type {Map<string, any>} */
+          this._managed.get(collGuid)
+        ) : null;
+        if (!entry) return;
         this._scheduleRecordRefresh();
-        const selfGuid = this._selfGuid();
-        if (!selfGuid) return;
-        let collGuid = "";
-        try {
-          const coll = ev && typeof ev.getCollection === "function" ? ev.getCollection() : null;
-          collGuid = coll && typeof coll.getGuid === "function" ? String(coll.getGuid() || "") : "";
-        } catch {
-        }
-        const rec = ev && typeof ev.getRecord === "function" ? ev.getRecord() : null;
-        if (!collGuid && rec) collGuid = recordCollectionGuid(rec);
-        if (!collGuid || collGuid !== selfGuid) return;
-        if (rec && rec.guid) /** @type {Map<string, any>} */
+        const rec = (
+          /** @type {any} */
+          ev && typeof ev.getRecord === "function" ? ev.getRecord() : null
+        );
+        if (!rec || !rec.guid) return;
+        /** @type {Map<string, any>} */
         this._recordsByGuid.set(rec.guid, rec);
-        if (rec) void this._ensureMeetingSkeleton(rec);
-      }));
+        /** @type {Map<string, string>} */
+        this._recordCollection.set(rec.guid, collGuid);
+        if (entry.binding.role === "owned") void this._ensureMeetingSkeleton(rec);
+      }, ALL));
       /** @type {any[]} */
       this._handlerIds.push(on("record.updated", (ev) => {
+        const collGuid = String(ev && ev.collectionGuid || "");
+        if (collGuid && !/** @type {Map<string, any>} */
+        this._managed.has(collGuid)) return;
         this._scheduleRecordRefresh();
-        this._updateNavButtonForActiveRecord();
-        const rec = ev && typeof ev.getRecord === "function" ? ev.getRecord() : ev;
-        if (rec && this._isOurRecord(rec)) void this._handleMeetingDateUpdate(rec);
-      }));
+        this._decorateStatusField();
+        const rec = (
+          /** @type {any} */
+          ev && typeof ev.getRecord === "function" ? ev.getRecord() : ev
+        );
+        if (!rec || !rec.guid) return;
+        if (collGuid) /** @type {Map<string, string>} */
+        this._recordCollection.set(rec.guid, collGuid);
+        if (this._isOurRecord(rec)) void this._handleMeetingDateUpdate(rec);
+      }, ALL));
       /** @type {any[]} */
       this._handlerIds.push(on("record.moved", () => this._scheduleRecordRefresh()));
+      const onCollectionChange = /* @__PURE__ */ __name(() => {
+        void this._safeAsync("reload managed collections", async () => {
+          await this._loadManaged();
+          this._scheduleRecordRefresh();
+        });
+      }, "onCollectionChange");
+      /** @type {any[]} */
+      this._handlerIds.push(on("collection.created", onCollectionChange, ALL));
+      /** @type {any[]} */
+      this._handlerIds.push(on("collection.updated", onCollectionChange, ALL));
       /** @type {any[]} */
       this._handlerIds.push(on("reload", () => {
         this._scheduleRecordRefresh();
@@ -6263,24 +6583,15 @@ ${text}`;
         this._commandItem.remove();
         this._commandItem = null;
       }
+      for (const item of this._actionCommands || []) {
+        try {
+          if (item && item.remove) item.remove();
+        } catch {
+        }
+      }
+      this._actionCommands = [];
       closeParticipantConfirmDialog();
       closeConfirmDialog(false);
-      try {
-        if (this._navButton && this._navButton.remove) this._navButton.remove();
-      } catch {
-      }
-      try {
-        if (this._syncButton && this._syncButton.remove) this._syncButton.remove();
-      } catch {
-      }
-      try {
-        if (this._regenerateButton && this._regenerateButton.remove) this._regenerateButton.remove();
-      } catch {
-      }
-      try {
-        if (this._diagnosticsButton && this._diagnosticsButton.remove) this._diagnosticsButton.remove();
-      } catch {
-      }
       if (this._editorObserver) this._editorObserver.disconnect();
       this._editorObserver = null;
       this._settingsPanel = null;
@@ -6321,19 +6632,10 @@ ${text}`;
     _secretsStorageKey() {
       let workspace = "";
       try {
-        workspace = /** @type {any} */
-        (this.getWorkspaceGuid ? (
-          /** @type {any} */
-          this.getWorkspaceGuid()
-        ) : "") || "";
+        workspace = this.getWorkspaceGuid ? this.getWorkspaceGuid() || "" : "";
       } catch {
       }
-      let collection = "";
-      try {
-        collection = (this.collection && this.collection.getGuid ? this.collection.getGuid() : "") || "";
-      } catch {
-      }
-      return `recall-ai/${workspace || "default"}/${collection || "collection"}/secrets`;
+      return `recall-ai/${workspace || "default"}/global/secrets`;
     }
     _loadLocalSecrets() {
       try {
@@ -6480,19 +6782,10 @@ ${text}`;
       try {
         let workspace = "";
         try {
-          workspace = /** @type {any} */
-          (this.getWorkspaceGuid ? (
-            /** @type {any} */
-            this.getWorkspaceGuid()
-          ) : "") || "";
+          workspace = this.getWorkspaceGuid ? this.getWorkspaceGuid() || "" : "";
         } catch {
         }
-        let collection = "";
-        try {
-          collection = (this.collection && this.collection.getGuid ? this.collection.getGuid() : "") || "";
-        } catch {
-        }
-        const guardKey = `recall-ai-secrets-promoted/${workspace || "default"}/${collection || "collection"}`;
+        const guardKey = `recall-ai-secrets-promoted/${workspace || "default"}/global`;
         if (sessionStorage.getItem(guardKey) === "1") return;
         sessionStorage.setItem(guardKey, "1");
       } catch {
@@ -6502,63 +6795,6 @@ ${text}`;
         anthropicApiKey: local.anthropicApiKey
       });
       if (ok) this._mirrorKeysLocally(local);
-    }
-    /**
-     * One-time migration (≤1.2.0 → 1.3.0): settings used to live in a single
-     * device-local blob at `recallAi/<ws>/<coll>/settings`, secrets included,
-     * with nothing synced. Split it — secrets into the local-only secrets
-     * entry, prefs through the shared store's public recovery path (so cache-key
-     * changes cannot strand a migration), then delete the legacy key only after
-     * the durable config write is confirmed.
-     */
-    _migrateLegacyLocalSettings() {
-      let workspace = "";
-      try {
-        workspace = /** @type {any} */
-        (this.getWorkspaceGuid ? (
-          /** @type {any} */
-          this.getWorkspaceGuid()
-        ) : "") || "";
-      } catch {
-      }
-      let collection = "";
-      try {
-        collection = (this.collection && this.collection.getGuid ? this.collection.getGuid() : "") || "";
-      } catch {
-      }
-      const legacyKey = `${CONFIG_KEY}/${workspace || "workspace"}/${collection || "collection"}/settings`;
-      let raw = null;
-      try {
-        raw = localStorage.getItem(legacyKey);
-      } catch {
-      }
-      if (raw === null) return;
-      let legacy = null;
-      try {
-        legacy = JSON.parse(raw);
-      } catch {
-        return;
-      }
-      try {
-        const secrets = normalizeSecrets(legacy);
-        if (Object.values(secrets).some(Boolean) && localStorage.getItem(this._secretsStorageKey()) === null) {
-          localStorage.setItem(this._secretsStorageKey(), JSON.stringify(secrets));
-        }
-        const prefs = normalizePrefs(legacy);
-        const recovered = this._settingsStore.recover(prefs);
-        if (!recovered) {
-          localStorage.removeItem(legacyKey);
-          return;
-        }
-        void Promise.resolve(this._configReady).then(() => this._settingsStore.flush()).then((ok) => {
-          if (!ok) return;
-          try {
-            localStorage.removeItem(legacyKey);
-          } catch {
-          }
-        });
-      } catch {
-      }
     }
     /**
      * @param {string} key
@@ -6580,13 +6816,11 @@ ${text}`;
       else this._refreshScopePill();
     }
     /**
-     * Live-follow of remote config changes. The shared store's own lifecycle
-     * listens for 'global-plugin.updated', but a CollectionPlugin's config
-     * lives on the collection root, whose remote saves fire 'collection.updated'
-     * instead — attach both. Prefs are adopted only while following synced;
-     * the per-user API-key slot is ALWAYS re-read (a second device picks up
-     * pushed keys without a manual reload). Registered BEFORE the kill-switch
-     * early-return so a disabled panel still tracks remote pushes.
+     * Live-follow of remote config changes. The shared store's own lifecycle handles the PREFS bag;
+     * this second listener covers the two custom siblings the store knows nothing about — the
+     * per-user API-key slot (so a second device picks up pushed keys without a reload) and the
+     * collection bindings. Filtered the way the store filters: this plugin's guid, remote only.
+     * Registered BEFORE the kill-switch early-return so a disabled panel still tracks remote pushes.
      */
     _registerSettingsLifecycle() {
       this._detachSettingsLifecycle = this._settingsStore.attachLifecycle({
@@ -6595,11 +6829,20 @@ ${text}`;
       const on = this.events && this.events.on ? this.events.on.bind(this.events) : null;
       if (!on) return;
       /** @type {any[]} */
-      this._handlerIds.push(on("collection.updated", (event) => {
+      this._handlerIds.push(on("global-plugin.updated", (event) => {
         try {
           if (event && event.source && event.source.isLocal) return;
-          const guid = this._selfGuid();
-          if (event && event.collectionGuid && guid && event.collectionGuid !== guid) return;
+          let guid = "";
+          try {
+            guid = this.getGuid ? this.getGuid() || "" : "";
+          } catch {
+          }
+          const ev = (
+            /** @type {any} */
+            event
+          );
+          const eventGuid = ev && (ev.pluginGuid || ev.guid || ev.rootId) || "";
+          if (eventGuid && guid && eventGuid !== guid) return;
           let changed = false;
           const nextSecrets = this._loadSecrets();
           if (JSON.stringify(nextSecrets) !== JSON.stringify(this._secrets)) {
@@ -6613,6 +6856,20 @@ ${text}`;
               changed = true;
             }
           }
+          void this._safeAsync("reload managed collections", async () => {
+            const before = JSON.stringify(Array.from(
+              /** @type {Map<string, any>} */
+              this._managed.keys()
+            ));
+            await this._loadManaged();
+            if (JSON.stringify(Array.from(
+              /** @type {Map<string, any>} */
+              this._managed.keys()
+            )) !== before) {
+              this._scheduleRecordRefresh();
+              this._renderPanel();
+            }
+          });
           if (!changed) return;
           this._recomputeSettings();
           this._restartPollingIntervals();
@@ -6622,8 +6879,7 @@ ${text}`;
       }));
     }
     /**
-     * Store-lifecycle adopt path (fires only for 'global-plugin.updated' —
-     * dead for CollectionPlugins today, kept for parity): adopt pushed prefs
+     * Store-lifecycle adopt path ('global-plugin.updated'): adopt pushed prefs
      * AND re-read the key slot, re-apply, re-render.
      * @param {any} prefs
      */
@@ -6648,7 +6904,7 @@ ${text}`;
           void this._settingsStore.pushToAll().then((ok) => {
             if (!ok) {
               this._refreshScopePill();
-              this._toast("Could not apply to all devices", "Thymer did not hand over a writable config handle for this collection.");
+              this._toast("Could not apply to all devices", "Thymer did not hand over a writable config handle for this plugin.");
               return;
             }
             this._toast("Meetings", "Settings applied to all devices");
@@ -6869,14 +7125,8 @@ ${text}`;
           metadata: {
             source: "thymer-recall-ai-plugin",
             record_guid: record.guid || "",
-            collection_guid: this.collection.getGuid ? this.collection.getGuid() : "",
-            workspace_guid: (
-              /** @type {any} */
-              this.getWorkspaceGuid ? (
-                /** @type {any} */
-                this.getWorkspaceGuid()
-              ) : ""
-            )
+            collection_guid: this._collectionGuidOf(record),
+            workspace_guid: this.getWorkspaceGuid ? this.getWorkspaceGuid() : ""
           }
         }
       );
@@ -7156,7 +7406,7 @@ ${text}`;
         if (!this._isOurRecord(record)) return;
         const { participants, source } = await this._fetchFinalParticipants(botId, entries);
         const names = participantNames(participants, this._settings.botName || DEFAULT_SETTINGS.botName);
-        if (names.length && this._fieldById(this._mappedFieldId(FIELDS.PARTICIPANT_NAMES))) {
+        if (names.length && this._fieldById(this._collectionGuidOf(record), this._mappedFieldId(record, FIELDS.PARTICIPANT_NAMES))) {
           this._setMappedField(record, FIELDS.PARTICIPANT_NAMES, names.join("\n"));
         }
         const botIdentity = normalizeIdentity(this._settings.botName || DEFAULT_SETTINGS.botName);
@@ -7168,7 +7418,7 @@ ${text}`;
           this._log("participants noted", { source, names: names.length, peopleLinking: false });
           return;
         }
-        const field = this._attendeesField();
+        const field = this._attendeesField(record);
         if (!isAttendeesRelationField(field)) {
           this._log("people linking skipped: Attendees must be a multi-record collection-link");
           return;
@@ -7400,7 +7650,7 @@ ${transcriptText}` }]
      * @param {string} suffix
      */
     _bodyKey(record, suffix) {
-      return `recall-ai/${this._selfGuid() || "collection"}/${record && record.guid || ""}/${suffix}`;
+      return `recall-ai/${this._collectionGuidOf(record) || "collection"}/${record && record.guid || ""}/${suffix}`;
     }
     /**
      * @param {any} line
@@ -7513,9 +7763,24 @@ ${transcriptText}` }]
       const level = ["h1", "h2", "h3", "none"].includes(this._settings && this._settings[spec.headingLevelKey]) ? this._settings[spec.headingLevelKey] : spec.fallbackLevel;
       return { text, level };
     }
-    /** @param {any} record */
+    /**
+     * Membership: is this record in a collection Meetings manages?
+     *
+     * A property handle is NOT membership (`record.prop(...)` is truthy on any page), and neither is
+     * a matching field id. If the record's collection is unknown, refuse rather than write.
+     * @param {any} record
+     */
     _isOurRecord(record) {
-      return isOwnedMeetingRecord(record, this._selfGuid(), this._recordsByGuid);
+      if (!record || !record.guid) return false;
+      const collGuid = this._collectionGuidOf(record);
+      return !!collGuid && /** @type {Map<string, any>} */
+      this._managed.has(collGuid);
+    }
+    /** True only for a collection Meetings created (or a migrated pre-2.0 install). */
+    /** @param {any} record */
+    _isOwnedRecord(record) {
+      const binding = this._bindingFor(record);
+      return !!binding && binding.role === "owned";
     }
     _bodySectionSpecs() {
       const extra = {};
@@ -7545,7 +7810,7 @@ ${transcriptText}` }]
      */
     async _ensureMeetingSkeleton(record) {
       if (this._disabled || !record || !record.guid) return;
-      if (!this._isOurRecord(record)) return;
+      if (!this._isOwnedRecord(record)) return;
       if (typeof record.insertFromMarkdown !== "function" || typeof record.getLineItems !== "function") return;
       if (!this._skeletonInFlight) this._skeletonInFlight = /* @__PURE__ */ new Map();
       return runCoalesced(this._skeletonInFlight, record.guid, async () => {
@@ -8927,7 +9192,7 @@ ${recovered}`;
     _healDiagnosticsSection() {
       return section({
         label: "Diagnostics",
-        hint: "Opt-in repairs. These stay here \u2014 they are not in the command palette. Heal mashed summaries and Apply heading format touch Meetings records only \u2014 never Journal or other collections. Remove leaked skeleton only deletes empty default headings on the page you have open.",
+        hint: "Opt-in repairs for records in managed collections only.",
         body: [
           h(
             "div",
@@ -8943,7 +9208,7 @@ ${recovered}`;
           h(
             "span",
             { class: `${ROOT_CLASS}-field-hint` },
-            "Scans every meeting in this collection. Already-healthy outlines are left alone."
+            "Scans every managed meeting; healthy outlines are left alone."
           ),
           h(
             "div",
@@ -8959,7 +9224,7 @@ ${recovered}`;
           h(
             "span",
             { class: `${ROOT_CLASS}-field-hint` },
-            "Apply heading format: relabel, resize, and reorder the four section headings on Meetings records to match current settings. Inserts an empty heading for any missing section (for example Action items on older meetings). Moves whole section blocks \u2014 Notes stay Notes. Does not rewrite body content or re-summarize."
+            "Relabels, resizes and reorders the four section headings to match current settings. Content is not rewritten."
           ),
           h(
             "div",
@@ -8975,7 +9240,7 @@ ${recovered}`;
           h(
             "span",
             { class: `${ROOT_CLASS}-field-hint` },
-            "Opt-in cleanup for the open page only (including Journal dailies). Removes empty \u{1F4DD} Summary / \u2705 Action items / \u{1F5D2}\uFE0F Notes / \u{1F399}\uFE0F Transcript headings with no user content under them. Headings with notes underneath are left alone."
+            "Removes empty default headings from the open page only."
           )
         ]
       });
@@ -9031,8 +9296,8 @@ ${recovered}`;
         if (!quiet) this._toast("Meetings is off", "Turn the plugin on to apply heading format.");
         return "failed";
       }
-      if (!this._isOurRecord(record)) {
-        if (!quiet) this._toast("Meetings records only", "Apply heading format never writes Journal or other collections.");
+      if (!this._isOwnedRecord(record)) {
+        if (!quiet) this._toast("Meetings collections only", "Apply heading format seeds missing section headings, so it only ever runs on a collection Meetings owns \u2014 never on a hosted calendar\u2019s events, Journal, or anything else.");
         return "failed";
       }
       const result = await this._applyHeadingFormatRecord(record);
@@ -9059,7 +9324,7 @@ ${recovered}`;
           /** @type {Map<string, any>} */
           this._recordsByGuid.values()
         ) {
-          if (!this._isOurRecord(record)) continue;
+          if (!this._isOwnedRecord(record)) continue;
           const result = await this._applyHeadingFormatRecord(record);
           if (result === "updated") updated += 1;
           else if (result === "skipped") skipped += 1;
@@ -9077,7 +9342,7 @@ ${recovered}`;
     }
     /** @param {any} record */
     async _applyHeadingFormatRecord(record) {
-      if (!record || !this._isOurRecord(record)) return "failed";
+      if (!record || !this._isOwnedRecord(record)) return "failed";
       if (typeof record.getLineItems !== "function") return "failed";
       try {
         let items = await record.getLineItems(false);
@@ -9223,112 +9488,15 @@ ${recovered}`;
       clearInterval(poller.timer);
       this._pollers.delete(botId);
     }
-    _updateNavButtonForActiveRecord() {
-      const panel2 = this.ui.getActivePanel && this.ui.getActivePanel();
-      const record = panel2 && panel2.getActiveRecord ? panel2.getActiveRecord() : null;
-      if (record && record.guid) this._activeRecordGuid = record.guid;
-      this._updateNavButtonForRecord(record);
-    }
-    /** @param {any} record */
-    _updateNavButtonForRecord(record) {
-      const pageRecord = (() => {
-        try {
-          const panel2 = this.ui.getActivePanel && this.ui.getActivePanel();
-          return panel2 && panel2.getActiveRecord ? panel2.getActiveRecord() : null;
-        } catch {
-          return null;
-        }
-      })();
-      const pinVisible = !!(pageRecord && pageRecord.guid);
-      const chrome = [this._navButton, this._syncButton, this._regenerateButton, this._diagnosticsButton];
-      for (const button2 of chrome) {
-        try {
-          button2 && button2.setOnlyWhenExpanded(!pinVisible);
-        } catch {
-        }
-      }
-      if (!this._navButton && !this._regenerateButton) return;
-      const target = record || this._activeRecordGuid && /** @type {Map<string, any>} */
-      this._recordsByGuid.get(this._activeRecordGuid) || null;
-      const state = this._recordVisualState(target);
-      const regenBusy = !pinVisible || state.kind === "summarizing";
-      try {
-        if (this._regenerateButton && typeof /** @type {any} */
-        this._regenerateButton.setDisabled === "function") {
-          /** @type {any} */
-          this._regenerateButton.setDisabled(regenBusy);
-        }
-      } catch {
-      }
-      void this._refreshJoinButtonVisibility(target, state.kind);
-      if (!this._navButton) return;
-      try {
-        this._navButton.setIcon(state.icon || "microphone");
-      } catch {
-      }
-      try {
-        this._navButton.setLabel(state.label);
-      } catch {
-      }
-      try {
-        this._navButton.setTooltip("");
-      } catch {
-      }
-    }
-    /** @param {any} record */
-    async _recordHasTranscriptContent(record) {
-      if (!record) return false;
-      const text = await this._readTranscriptText(record);
-      return !!String(text || "").trim();
-    }
     /**
-     * @param {any} button
-     * @param {boolean} hidden
+     * The nav-strip buttons are gone in 2.0 (a global plugin has no collection action bar), but ~27
+     * call sites still say "the record's affordance may have gone stale, refresh it". They mean the
+     * record-page Bot Status button now, so the NAME stays and the body redirects — zero call-site
+     * churn, and no risk of missing one.
+     * @param {any} _record
      */
-    _setNavButtonHidden(button2, hidden) {
-      if (!button2) return false;
-      try {
-        if (typeof button2.setHidden === "function") {
-          button2.setHidden(!!hidden);
-          return true;
-        }
-      } catch {
-      }
-      try {
-        if (typeof button2.setVisible === "function") {
-          button2.setVisible(!hidden);
-          return true;
-        }
-      } catch {
-      }
-      return false;
-    }
-    /**
-     * @param {any} record
-     * @param {string} kind
-     */
-    async _refreshJoinButtonVisibility(record, kind) {
-      let hide = false;
-      try {
-        hide = (kind === "done" || kind === "repair") && await this._recordHasTranscriptContent(record);
-      } catch {
-        hide = false;
-      }
-      if (this._setNavButtonHidden(this._navButton, hide)) return;
-      if (hide && this._navButton && typeof this._navButton.remove === "function") {
-        try {
-          this._navButton.remove();
-        } catch {
-        }
-        this._navButton = null;
-        return;
-      }
-      if (!hide && !this._navButton) {
-        try {
-          this._navButton = this._createJoinButton();
-        } catch {
-        }
-      }
+    _updateNavButtonForRecord(_record) {
+      this._decorateStatusField();
     }
     /**
      * Meeting Date as epoch ms, or null when unset/unparseable.
@@ -9495,54 +9663,144 @@ ${recovered}`;
         this._toast("Unable to load diagnostics", this._errorMessage(err));
       }
     }
-    _collectionFields() {
-      const conf = (
-        /** @type {any} */
-        this.getConfiguration ? this.getConfiguration() : {}
-      );
-      return Array.isArray(conf.fields) ? conf.fields.filter((field) => field && field.active !== false) : [];
+    /**
+     * A managed collection's active properties.
+     *
+     * In 1.x this read `this.getConfiguration()` — the collection's own config. A global plugin's
+     * config has no `fields`, so every field lookup now has to name the collection it means.
+     * @param {string} collectionGuid
+     */
+    _collectionFields(collectionGuid) {
+      const api = this._managedApi(collectionGuid) || this._collectionByGuid(collectionGuid);
+      let conf = null;
+      try {
+        conf = api && api.getConfiguration ? api.getConfiguration() : null;
+      } catch {
+        conf = null;
+      }
+      const fields = conf && Array.isArray(conf.fields) ? conf.fields : [];
+      return fields.filter((field) => field && field.active !== false);
     }
     /**
-     * New installs get Attendees from plugin.json. Existing installs need the same field added without
-     * deleting any old transcript/summary data. Those retired text properties are merely hidden and
-     * removed from views; their stored values remain recoverable in the collection configuration.
+     * Bring every OWNED collection's schema up to date: hide the retired transcript/summary text
+     * properties, rename Join At → Date, guarantee an Attendees relation and a Related relation.
+     *
+     * Owned only, and — unlike 1.x — WITHOUT `configWithPluginVersion`. A collection is not this
+     * plugin any more; stamping our semver onto it would make the Plugins Manager and the collection
+     * disagree about what is installed where.
      */
-    async _migrateCollectionSchema() {
-      return queuePluginConfigWrite(this, () => this._migrateCollectionSchemaNow());
-    }
-    async _migrateCollectionSchemaNow() {
-      const api = await resolveConfigApi(this);
-      if (!api || typeof api.saveConfiguration !== "function") return;
-      const live = api.getConfiguration?.() || this.getConfiguration?.() || {};
-      const migrated = migrateMeetingSchema(live);
-      if (!migrated.changed) return;
-      try {
-        let workspace = "default";
-        try {
-          workspace = /** @type {any} */
-          this.getWorkspaceGuid?.() || "default";
-        } catch {
-        }
-        let collection = "collection";
-        try {
-          collection = this.collection?.getGuid?.() || "collection";
-        } catch {
-        }
-        const guardKey = `recall-ai/schema/${workspace}/${collection}/${PLUGIN_VERSION}`;
-        if (sessionStorage.getItem(guardKey) === "attempted") return;
-        sessionStorage.setItem(guardKey, "attempted");
-      } catch {
+    async _migrateOwnedSchemas() {
+      for (
+        const [guid, entry] of
+        /** @type {Map<string, any>} */
+        this._managed
+      ) {
+        if (!entry || entry.binding.role !== "owned") continue;
+        await this._safeAsync("migrate owned schema", () => this._migrateOwnedSchema(guid, entry.api));
       }
-      await api.saveConfiguration(configWithPluginVersion(migrated.configuration, {}, PLUGIN_VERSION));
     }
-    /** @param {any} id */
-    _fieldById(id) {
+    /**
+     * @param {string} collectionGuid
+     * @param {any} api
+     */
+    async _migrateOwnedSchema(collectionGuid, api) {
+      if (!api || typeof api.saveConfiguration !== "function") return;
+      return queuePluginConfigWrite(api, async () => {
+        const live = api.getConfiguration?.() || {};
+        const migrated = migrateMeetingSchema(live);
+        if (!migrated.changed) return;
+        try {
+          let workspace = "default";
+          try {
+            workspace = this.getWorkspaceGuid?.() || "default";
+          } catch {
+          }
+          const guardKey = `recall-ai/schema/${workspace}/${collectionGuid}/${PLUGIN_VERSION}`;
+          if (sessionStorage.getItem(guardKey) === "attempted") return;
+          sessionStorage.setItem(guardKey, "attempted");
+        } catch {
+        }
+        await api.saveConfiguration(migrated.configuration);
+      });
+    }
+    /**
+     * Add the three integration properties to a HOSTED collection — bot id, status, last error — and
+     * nothing else. One save, idempotent. `meeting_url` is deliberately NOT here: a calendar already
+     * has the link somewhere, and the Collections tab's "Create a … property" offers it explicitly if
+     * the user really wants a dedicated one.
+     *
+     * @param {string} collectionGuid
+     */
+    async _ensureHostedFields(collectionGuid) {
+      const api = this._managedApi(collectionGuid) || this._collectionByGuid(collectionGuid);
+      if (!api || typeof api.saveConfiguration !== "function") {
+        this._toast("Could not add the Meetings properties", "Thymer did not hand over a writable config handle for that collection.");
+        return false;
+      }
+      return queuePluginConfigWrite(api, async () => {
+        const live = api.getConfiguration?.() || {};
+        const conf = JSON.parse(JSON.stringify(live));
+        conf.fields = Array.isArray(conf.fields) ? conf.fields : [];
+        let changed = false;
+        for (const id of HOSTED_FIELD_IDS) {
+          if (conf.fields.some((field) => String(field && field.id || "") === id)) continue;
+          conf.fields.push({ ...FIELD_DEFS[id] });
+          changed = true;
+        }
+        changed = this._ensureFieldVisible(conf, HOSTED_FIELD_IDS) || changed;
+        if (!changed) return true;
+        const ok = await api.saveConfiguration(conf);
+        if (ok === false) {
+          this._toast("Could not add the Meetings properties", "Thymer rejected the change.");
+          return false;
+        }
+        return true;
+      });
+    }
+    /**
+     * Put field ids on the record page, in the first table view, and in the default property set.
+     * Returns true when anything changed.
+     *
+     * @param {any} conf a MUTABLE clone of a collection config
+     * @param {readonly string[]} ids
+     */
+    _ensureFieldVisible(conf, ids) {
+      let changed = false;
+      conf.page_field_ids = Array.isArray(conf.page_field_ids) ? conf.page_field_ids : [];
+      const table = (Array.isArray(conf.views) ? conf.views : []).find((view) => String(view && view.type || "") === "table");
+      const setName = conf.property_set_default;
+      const sets = conf.property_sets && typeof conf.property_sets === "object" ? conf.property_sets : null;
+      const defaultSet = setName && sets && sets[setName] && typeof sets[setName] === "object" ? sets[setName] : null;
+      for (const id of ids) {
+        if (!conf.page_field_ids.includes(id)) {
+          conf.page_field_ids.push(id);
+          changed = true;
+        }
+        if (table && Array.isArray(table.field_ids) && !table.field_ids.includes(id)) {
+          table.field_ids.push(id);
+          changed = true;
+        }
+        if (defaultSet && Array.isArray(defaultSet.member_ids) && !defaultSet.member_ids.includes(id)) {
+          defaultSet.member_ids.push(id);
+          changed = true;
+        }
+      }
+      return changed;
+    }
+    /**
+     * @param {string} collectionGuid
+     * @param {any} id
+     */
+    _fieldById(collectionGuid, id) {
       if (!id) return null;
-      return this._collectionFields().find((field) => String(field.id) === String(id)) || null;
+      return this._collectionFields(collectionGuid).find((field) => String(field.id) === String(id)) || null;
     }
-    _attendeesField() {
-      const selected = String(this._settings.attendeesFieldId || "").trim();
-      return findAttendeesRelationField(this._collectionFields(), selected);
+    /** @param {any} record */
+    _attendeesField(record) {
+      const collGuid = this._collectionGuidOf(record);
+      const binding = this._bindingFor(record);
+      const selected = binding ? binding.attendeesFieldId : "";
+      return findAttendeesRelationField(this._collectionFields(collGuid), selected);
     }
     /** @param {string} field */
     _mappingSettingFor(field) {
@@ -9553,20 +9811,30 @@ ${recovered}`;
       if (field === FIELDS.RELATED) return "relatedFieldId";
       return "";
     }
-    /** @param {string} field */
-    _mappedFieldId(field) {
+    /**
+     * The property id to read/write for a canonical field ON THIS RECORD'S collection: the binding's
+     * mapping when set, else the canonical id.
+     * @param {any} record
+     * @param {string} field
+     */
+    _mappedFieldId(record, field) {
       const setting = this._mappingSettingFor(field);
-      const mapped = setting ? String(this._settings[setting] || "").trim() : "";
+      const binding = this._bindingFor(record);
+      const mapped = setting && binding ? String(binding[setting] || "").trim() : "";
       return mapped || field;
     }
-    _meetingUrlFieldIds() {
-      const fields = this._collectionFields();
-      const selected = String(this._settings.meetingUrlFieldId || "").trim();
+    /**
+     * Auto-detect order for the meeting link, OWNED collections only. Hosted collections never guess:
+     * a calendar record carries a "Google Link" to the event page on every single row, and sending a
+     * paid bot to a calendar web page is worse than doing nothing.
+     * @param {string} collectionGuid
+     */
+    _meetingUrlFieldIds(collectionGuid) {
+      const fields = this._collectionFields(collectionGuid);
       const ids = [];
       const add = /* @__PURE__ */ __name((id) => {
         if (id && !ids.includes(id)) ids.push(id);
       }, "add");
-      add(selected);
       add(FIELDS.MEETING_URL);
       const normalizedMatches = /* @__PURE__ */ __name((field) => {
         const haystack = `${field.id || ""} ${field.label || ""}`.toLowerCase();
@@ -9583,9 +9851,22 @@ ${recovered}`;
       }
       return ids;
     }
-    /** @param {any} record */
+    /**
+     * The meeting link on a record, or '' when there is none.
+     *
+     * Mapped field set → that field ONLY, through extractMeetingUrl (a calendar keeps the Meet link
+     * inside Location/description prose). Unset + owned → today's auto-detect heuristic. Unset +
+     * hosted → inert: no button, no inline mic, no auto-schedule, until the user maps a field.
+     * @param {any} record
+     */
     _meetingUrl(record) {
-      for (const fieldId of this._meetingUrlFieldIds()) {
+      if (!record) return "";
+      const binding = this._bindingFor(record);
+      if (!binding) return "";
+      const mapped = String(binding.meetingUrlFieldId || "").trim();
+      if (mapped) return extractMeetingUrl(this._text(record, mapped));
+      if (binding.role !== "owned") return "";
+      for (const fieldId of this._meetingUrlFieldIds(this._collectionGuidOf(record))) {
         const value = this._text(record, fieldId);
         if (value) return value;
       }
@@ -9610,13 +9891,16 @@ ${recovered}`;
       }, 300);
     }
     /**
-     * Book a bot for any meeting whose Date is far enough out that Recall treats it as a
-     * scheduled bot (autoSchedule, default on). Deliberately never fires for imminent/past meetings —
-     * an auto-sent ad-hoc bot would walk into a room nobody is in yet and bill for it.
+     * Book a bot for any meeting whose Date is far enough out that Recall treats it as a scheduled
+     * bot. Deliberately never fires for imminent/past meetings — an auto-sent ad-hoc bot would walk
+     * into a room nobody is in yet and bill for it.
+     *
+     * Auto-scheduling is PER COLLECTION in 2.x (binding.autoSchedule), on by default for a
+     * collection Meetings owns and off for a hosted one: a calendar full of future Meet links would
+     * otherwise book — and bill for — a paid bot on every single event.
      */
     _autoScheduleSweep() {
       if (this._disabled) return;
-      if (!this._settings.autoSchedule) return;
       if (!this._settings.recallApiKey) return;
       for (
         const record of
@@ -9662,7 +9946,7 @@ ${recovered}`;
       }
       const blocked = scheduleBlockReason(this._joinAtMs(record));
       if (blocked) {
-        if (blocked === "too_soon" && this._settings.autoSchedule && !this._text(record, FIELDS.BOT_ID)) {
+        if (blocked === "too_soon" && this._bindingFor(record)?.autoSchedule && !this._text(record, FIELDS.BOT_ID)) {
           await this._startBot(
             /** @type {any} */
             record,
@@ -9679,13 +9963,14 @@ ${recovered}`;
       }
       /** @type {Set<string>} */
       this._autoScheduled.delete(guid);
-      if (this._settings.autoSchedule) await this._maybeAutoSchedule(record);
+      if (this._bindingFor(record)?.autoSchedule) await this._maybeAutoSchedule(record);
     }
     /** @param {any} record */
     async _maybeAutoSchedule(record) {
       const guid = record && record.guid;
       if (!guid || /** @type {Set<string>} */
       this._autoScheduled.has(guid)) return;
+      if (!this._bindingFor(record)?.autoSchedule) return;
       if (this._text(record, FIELDS.BOT_ID)) return;
       if (!this._meetingUrl(record)) return;
       if (!this._isScheduledDispatch(record)) return;
@@ -9696,27 +9981,47 @@ ${recovered}`;
       if (!this._text(record, FIELDS.BOT_ID)) /** @type {Set<string>} */
       this._autoScheduled.delete(guid);
     }
+    /**
+     * Rebuild both indexes across EVERY managed collection.
+     *
+     * `_recordCollection` is the half that matters most: a PluginRecord cannot say which collection
+     * it is in, so without this map a record handed to us by a poller or a panel is unattributable —
+     * and every field lookup, body key and write gate depends on knowing.
+     */
     async _refreshRecordIndex() {
-      try {
-        const records = await this.collection.getAllRecords();
-        this._recordsByGuid = /* @__PURE__ */ new Map();
-        for (const record of records) {
-          if (record && record.guid) {
-            this._recordsByGuid.set(record.guid, record);
-            if (!/** @type {Map<string, any>} */
-            this._lastJoinAtByGuid.has(record.guid)) {
-              /** @type {Map<string, any>} */
-              this._lastJoinAtByGuid.set(record.guid, this._joinAtIso(record) || "");
-            }
-          }
+      const byGuid = /* @__PURE__ */ new Map();
+      const collectionOf = /* @__PURE__ */ new Map();
+      for (
+        const [collGuid, entry] of
+        /** @type {Map<string, any>} */
+        this._managed
+      ) {
+        let records = [];
+        try {
+          records = await entry.api.getAllRecords() || [];
+        } catch (err) {
+          this._log("collection records unavailable", { collectionGuid: collGuid, error: this._errorMessage(err) });
+          continue;
         }
-      } catch (err) {
-        this._toast("Unable to load meeting records", this._errorMessage(err));
+        for (const record of records) {
+          if (!record || !record.guid) continue;
+          byGuid.set(record.guid, record);
+          collectionOf.set(record.guid, collGuid);
+        }
+      }
+      this._recordsByGuid = byGuid;
+      this._recordCollection = collectionOf;
+      for (const record of byGuid.values()) {
+        if (!/** @type {Map<string, any>} */
+        this._lastJoinAtByGuid.has(record.guid)) {
+          /** @type {Map<string, any>} */
+          this._lastJoinAtByGuid.set(record.guid, this._joinAtIso(record) || "");
+        }
       }
     }
     /** @param {any} record */
     _joinAtIso(record) {
-      const prop = this._prop(record, this._mappedFieldId(FIELDS.JOIN_AT));
+      const prop = this._prop(record, this._mappedFieldId(record, FIELDS.JOIN_AT));
       if (!prop) return null;
       try {
         const dt = prop.datetime && prop.datetime();
@@ -9762,7 +10067,7 @@ ${recovered}`;
      * @param {any} value
      */
     _setMappedField(record, field, value) {
-      return this._setField(record, this._mappedFieldId(field), value);
+      return this._setField(record, this._mappedFieldId(record, field), value);
     }
     /**
      * @param {any} record
@@ -9776,7 +10081,7 @@ ${recovered}`;
       } catch {
       }
       if (prop) return prop;
-      const field = this._fieldById(fieldIdOrLabel);
+      const field = this._fieldById(this._collectionGuidOf(record), fieldIdOrLabel);
       if (field && field.label) {
         try {
           prop = record.prop(field.label);
@@ -9881,6 +10186,10 @@ ${recovered}`;
         if (!guid || !/** @type {Map<string, any>} */
         this._recordsByGuid.has(guid)) continue;
         if (this._isStructuralGuid(guid)) continue;
+        if (!this._meetingUrl(
+          /** @type {Map<string, any>} */
+          this._recordsByGuid.get(guid)
+        )) continue;
         const anchor = leaf.closest(INLINE_REF_SELECTOR) || leaf;
         const next = anchor.nextElementSibling;
         if (next && next.classList && next.classList.contains(INLINE_BUTTON_CLASS) && next.getAttribute("data-guid") === guid) {
@@ -9920,6 +10229,38 @@ ${recovered}`;
       document.querySelectorAll(`.${INLINE_BUTTON_CLASS}`).forEach((el2) => el2.remove());
       document.querySelectorAll(`[${INLINE_APPLIED_ATTR}]`).forEach((el2) => el2.removeAttribute(INLINE_APPLIED_ATTR));
     }
+    /**
+     * Where the user was in the panel, across the plugin reload every config save triggers.
+     *
+     * sessionStorage, not the settings store: this is UI position, it is per-window, and routing it
+     * through a synced blob would mean a save to remember where you were before a save.
+     */
+    _panelPlaceKey() {
+      let workspace = "";
+      try {
+        workspace = this.getWorkspaceGuid ? this.getWorkspaceGuid() || "" : "";
+      } catch {
+      }
+      return `recall-ai/${workspace || "default"}/panel-place`;
+    }
+    _restorePanelPlace() {
+      this._activeTab = "setup";
+      try {
+        const parsed = JSON.parse(sessionStorage.getItem(this._panelPlaceKey()) || "null");
+        if (parsed && typeof parsed.tab === "string") this._activeTab = parsed.tab;
+        if (parsed && typeof parsed.collection === "string") this._selectedCollectionGuid = parsed.collection;
+      } catch {
+      }
+    }
+    _savePanelPlace() {
+      try {
+        sessionStorage.setItem(this._panelPlaceKey(), JSON.stringify({
+          tab: this._activeTab || "setup",
+          collection: this._selectedCollectionGuid || ""
+        }));
+      } catch {
+      }
+    }
     _renderPanel() {
       if (!this._panelEl) return;
       if (!this._activeTab) this._activeTab = "setup";
@@ -9941,7 +10282,7 @@ ${recovered}`;
           options: [
             { value: "setup", label: "Setup" },
             { value: "connection", label: "Connection" },
-            { value: "fields", label: "Field Mapping" },
+            { value: "collections", label: "Collections" },
             { value: "transcripts", label: "Transcripts" },
             { value: "summary", label: "Summary" },
             { value: "costs", label: "Costs" }
@@ -9949,6 +10290,7 @@ ${recovered}`;
           value: this._activeTab,
           onChange: /* @__PURE__ */ __name((value) => {
             this._activeTab = value;
+            this._savePanelPlace();
             this._renderPanel();
           }, "onChange")
         }),
@@ -9963,8 +10305,8 @@ ${recovered}`;
       switch (this._activeTab) {
         case "connection":
           return this._tabConnection(draft);
-        case "fields":
-          return this._tabFieldMapping();
+        case "collections":
+          return this._tabCollections();
         case "transcripts":
           return this._tabTranscripts(draft);
         case "summary":
@@ -9977,6 +10319,10 @@ ${recovered}`;
       }
     }
     _tabSetup() {
+      const managed = (
+        /** @type {Map<string, any>} */
+        this._managed.size
+      );
       return [
         section({
           label: "Setup",
@@ -9984,7 +10330,7 @@ ${recovered}`;
             h(
               "p",
               { class: `${ROOT_CLASS}-collection-note` },
-              `Recall.ai runs in ${this._selfName()}, the collection it created when you installed it. Everything here applies to that collection.`
+              managed ? `Meetings is a global plugin. It currently manages ${managed} collection${managed === 1 ? "" : "s"} \u2014 add, remove, and map them in the Collections tab.` : "No collections yet. Use the Collections tab to create one or add an existing collection."
             ),
             this._setupSteps()
           ]
@@ -10000,12 +10346,12 @@ ${recovered}`;
         conf: this.getConfiguration ? this.getConfiguration() : {},
         userGuid: this._currentUserGuid(),
         version: PLUGIN_VERSION,
-        collectionGuid: this._selfGuid(),
-        settings: this._settings
+        collectionGuid: this._selectedCollectionGuid || Object.keys(this._bindings())[0] || "",
+        settings: { ...this._settings, ...this._bindings()[this._selectedCollectionGuid] || {} }
       }), null, 2);
       return section({
         label: "Export settings (dev)",
-        hint: "Copy this JSON before installing Meetings 2.0 as a global plugin; its Import button restores settings, keys, and field mapping. Contains your API keys \u2014 keep it private.",
+        hint: "Copy before installing 2.0. Contains your API keys.",
         body: [
           h(
             "label",
@@ -10024,6 +10370,218 @@ ${recovered}`;
             })
           )
         ]
+      });
+    }
+    /**
+     * Dev-only: restore a 1.x collection install into this global plugin.
+     *
+     * One `saveCustomPatch`, so prefs, this user's API keys, and the owned binding for the exported
+     * collection land together or not at all. The imported keys only fill EMPTY slot fields — an
+     * accidental re-import can never overwrite a key rotated since.
+     */
+    _settingsImportSection() {
+      return section({
+        label: "Import settings (dev)",
+        hint: "Bring settings, keys and field mapping over from a 1.x install.",
+        body: [
+          this._legacyCollectionPicker(),
+          h(
+            "label",
+            { class: `${ROOT_CLASS}-field` },
+            h("span", { class: `${ROOT_CLASS}-field-label` }, "Settings JSON"),
+            h("textarea", {
+              rows: 8,
+              placeholder: '{ "format": "meetings-settings", \u2026 }',
+              value: this._importDraft || "",
+              onInput: /* @__PURE__ */ __name((event) => {
+                this._importDraft = event.target.value;
+              }, "onInput")
+            })
+          ),
+          h(
+            "div",
+            { class: `${ROOT_CLASS}-field` },
+            button({
+              label: "Import settings",
+              variant: "primary",
+              size: "md",
+              onClick: /* @__PURE__ */ __name(() => void this._importSettings(), "onClick")
+            })
+          )
+        ]
+      });
+    }
+    /** Dev-only: collections still carrying a 1.x settings bag, offered for a direct import. */
+    _legacyCollectionPicker() {
+      const candidates = (this._workspaceCollections || []).filter((api) => {
+        try {
+          const c = api.getConfiguration();
+          return !!(c && c.custom && c.custom[CONFIG_KEY]);
+        } catch {
+          return false;
+        }
+      });
+      if (!candidates.length) return null;
+      const guids = candidates.map((api) => {
+        try {
+          return String(api.getGuid());
+        } catch {
+          return "";
+        }
+      });
+      if (!this._legacyPickGuid || !guids.includes(this._legacyPickGuid)) this._legacyPickGuid = guids[0];
+      return h(
+        "div",
+        { class: `${ROOT_CLASS}-field` },
+        h("span", { class: `${ROOT_CLASS}-field-label` }, "Import from a 1.x collection"),
+        h(
+          "div",
+          { class: `${ROOT_CLASS}-coll-pick` },
+          this._dropdown({
+            value: String(this._legacyPickGuid || ""),
+            options: guids.map((guid) => (
+              /** @type {[string, string]} */
+              [guid, this._collectionName(guid)]
+            )),
+            onChange: /* @__PURE__ */ __name((guid) => {
+              this._legacyPickGuid = guid;
+              if (this._panelEl && document.contains(this._panelEl)) this._renderPanel();
+            }, "onChange")
+          }),
+          button({
+            label: "Import from this collection",
+            variant: "primary",
+            size: "md",
+            onClick: /* @__PURE__ */ __name(() => void this._importFromLegacyCollection(String(this._legacyPickGuid || "")), "onClick")
+          })
+        ),
+        h("span", { class: `${ROOT_CLASS}-field-hint` }, "Reads that collection\u2019s stored settings. It is not modified.")
+      );
+    }
+    /** @param {string} collectionGuid */
+    async _importFromLegacyCollection(collectionGuid) {
+      const api = this._collectionByGuid(collectionGuid);
+      if (!api) return this._toast("Could not import", "That collection is no longer available.");
+      let conf = null;
+      try {
+        conf = api.getConfiguration();
+      } catch {
+        conf = null;
+      }
+      if (!conf || !conf.custom || !conf.custom[CONFIG_KEY]) return this._toast("Could not import", "That collection carries no Meetings settings.");
+      return this._importSettings(buildLegacyCollectionExport({ conf, userGuid: this._currentUserGuid(), version: PLUGIN_VERSION, collectionGuid }));
+    }
+    /** @param {any} [importedArg] a ready export object; omitted → parse the pasted JSON draft */
+    async _importSettings(importedArg) {
+      const imported = (
+        /** @type {any} */
+        importedArg || parseSettingsImport(this._importDraft || "")
+      );
+      if (imported.error) return this._toast("Could not import", imported.error);
+      const userGuid = this._currentUserGuid();
+      const ok = await this._settingsStore.saveCustomPatch((custom) => applySettingsImport(custom, imported, userGuid, {
+        prefsKey: CONFIG_KEY,
+        secretsKey: SECRETS_CONFIG_KEY,
+        bindingsKey: BINDINGS_CONFIG_KEY
+      }));
+      if (!ok) return this._toast("Could not import", "Thymer did not hand over a writable config handle.");
+      this._importDraft = "";
+      this._selectedCollectionGuid = imported.collectionGuid;
+      this._savePanelPlace();
+      await this._loadManaged();
+      this._toast("Settings imported", `${this._collectionName(imported.collectionGuid)} is now a Meetings collection. Clear its old plugin code next.`);
+      if (this._panelEl && document.contains(this._panelEl)) this._renderPanel();
+      return true;
+    }
+    /**
+     * Dev-only: the button that retires the 1.x CollectionPlugin still running beside this one.
+     *
+     * Shown only when that collection's code really is a Meetings bundle — a foreign owner must
+     * never be offered up for replacement.
+     * @param {string} collectionGuid
+     */
+    _clearOldCodeControl(collectionGuid) {
+      const code = this._collectionCode(collectionGuid);
+      if (!code) return null;
+      const classified = classifyCollectionCode(code);
+      if (classified.kind !== "owner" || !/plg-(meetings|recall-ai)/.test(code)) return null;
+      return h(
+        "div",
+        { class: `${ROOT_CLASS}-field` },
+        button({
+          label: "Clear old plugin code (dev)",
+          variant: "ghost",
+          size: "md",
+          onClick: /* @__PURE__ */ __name(() => void this._clearOldCollectionCode(collectionGuid), "onClick")
+        }),
+        h(
+          "span",
+          { class: `${ROOT_CLASS}-field-hint` },
+          "The 1.x copy still runs here. Replaces its code with an empty stub; other plugins\u2019 hooks and the collection\u2019s data stay."
+        )
+      );
+    }
+    /** @param {string} collectionGuid */
+    _collectionCode(collectionGuid) {
+      const api = this._managedApi(collectionGuid) || this._collectionByGuid(collectionGuid);
+      try {
+        const existing = api && api.getExistingCodeAndConfig ? api.getExistingCodeAndConfig() : null;
+        return String(existing && existing.code || "");
+      } catch {
+        return "";
+      }
+    }
+    /**
+     * Replace a retired Meetings collection's code with a stub.
+     *
+     * NEVER save collection code that has not been parsed: Thymer `new Function()`s it, and a fatal
+     * load halts its data worker — one bad string makes the whole app unopenable in every synced
+     * client. `composeStubCode` runs the same check Thymer does and refuses rather than return a
+     * string; the belt-and-braces `assertCodeSafe` here is deliberate.
+     *
+     * @param {string} collectionGuid
+     */
+    async _clearOldCollectionCode(collectionGuid) {
+      const api = this._managedApi(collectionGuid) || this._collectionByGuid(collectionGuid);
+      if (!api || typeof api.savePlugin !== "function") {
+        return this._toast("Could not clear the old code", "Thymer did not hand over a writable handle for that collection.");
+      }
+      const name = this._collectionName(collectionGuid);
+      const confirmed = await this._confirmBodyWrite({
+        title: "Clear old plugin code",
+        body: {
+          intro: `${name} still runs the pre-2.0 Meetings collection plugin. Replacing its code with an empty stub will:`,
+          items: [
+            "Stop the old copy from running beside this global plugin",
+            "Keep every appended hook from other plugins exactly as it is",
+            "Leave the collection\u2019s properties, views, records, and stored settings untouched"
+          ],
+          outro: "The plugin\u2019s repository link is removed so the Plugins Manager stops offering it collection updates."
+        },
+        confirmLabel: "Clear old code"
+      });
+      if (!confirmed) return false;
+      return queuePluginConfigWrite(api, async () => {
+        try {
+          const existing = api.getExistingCodeAndConfig ? api.getExistingCodeAndConfig() : null;
+          const code = String(existing && existing.code || "");
+          if (!code.trim()) return this._toast("Nothing to clear", `${name} has no collection code.`);
+          const stub = composeStubCode(code);
+          if (!stub.ok) return this._toast("Refused to clear the old code", `The replacement ${stub.reason}. Nothing was written.`);
+          const recheck = assertCodeSafe(stub.code);
+          if (!recheck.ok) return this._toast("Refused to clear the old code", `The replacement ${recheck.reason}. Nothing was written.`);
+          const json = JSON.parse(JSON.stringify(existing && existing.json || api.getConfiguration?.() || {}));
+          delete json.__source_repo;
+          delete json.__source_files;
+          const ok = await api.savePlugin(json, stub.code);
+          if (ok === false) throw new Error("Thymer rejected the change.");
+          this._toast("Old plugin code cleared", stub.patches.length ? `${name} now runs an empty stub; ${stub.patches.length} other plugin hook${stub.patches.length === 1 ? "" : "s"} preserved.` : `${name} now runs an empty stub.`);
+          if (this._panelEl && document.contains(this._panelEl)) this._renderPanel();
+          return true;
+        } catch (err) {
+          this._toast("Could not clear the old code", this._errorMessage(err));
+          return false;
+        }
       });
     }
     _tabCosts() {
@@ -10082,7 +10640,7 @@ ${recovered}`;
       const rows = state && Array.isArray(state.results) ? state.results : [];
       const doctor = section({
         label: "Setup Doctor",
-        hint: "Checks the bridge, credentials, storage, and field bindings without creating a bot or generating text.",
+        hint: "Checks bridge, keys, storage and field bindings. Creates nothing.",
         body: [
           h(
             "div",
@@ -10094,7 +10652,7 @@ ${recovered}`;
               disabled: !!this._setupDoctorInFlight,
               onClick: /* @__PURE__ */ __name(() => void this._runSetupDoctor(), "onClick")
             }),
-            state && state.checkedAt ? h("span", { class: `${ROOT_CLASS}-field-hint` }, `Last checked ${new Date(state.checkedAt).toLocaleString()}`) : null
+            state && state.checkedAt ? h("span", { class: `${ROOT_CLASS}-meta` }, `Last checked ${new Date(state.checkedAt).toLocaleString()}`) : null
           ),
           rows.length ? h("div", { class: `${ROOT_CLASS}-doctor-results` }, rows.map(
             (item) => h(
@@ -10103,33 +10661,19 @@ ${recovered}`;
               h("i", { class: `ti ti-${item.level === "pass" ? "circle-check" : item.level === "warn" ? "alert-triangle" : "x"}`, "aria-hidden": "true" }),
               h("span", {}, h("strong", {}, item.label), ` \u2014 ${item.message}`)
             )
-          )) : h("span", { class: `${ROOT_CLASS}-field-hint` }, "No checks run yet.")
+          )) : h("span", { class: `${ROOT_CLASS}-meta` }, "No checks run yet.")
         ]
       });
       doctor.classList.add(`${ROOT_CLASS}-doctor-card`);
-      const label = doctor.querySelector(".tps-section-label");
-      if (label) {
-        label.classList.add(`${ROOT_CLASS}-doctor-label`);
-        label.prepend(h("i", { class: `ti ti-stethoscope ${ROOT_CLASS}-doctor-icon`, "aria-hidden": "true" }));
-      }
       return doctor;
     }
     _setupDoctorStorageKey() {
       let workspace = "";
       try {
-        workspace = /** @type {any} */
-        (this.getWorkspaceGuid ? (
-          /** @type {any} */
-          this.getWorkspaceGuid()
-        ) : "") || "";
+        workspace = this.getWorkspaceGuid ? this.getWorkspaceGuid() || "" : "";
       } catch {
       }
-      let collection = "";
-      try {
-        collection = (this.collection && this.collection.getGuid ? this.collection.getGuid() : "") || "";
-      } catch {
-      }
-      return `recall-ai/${workspace || "default"}/${collection || "collection"}/setup-doctor-v1`;
+      return `recall-ai/${workspace || "default"}/setup-doctor-v1`;
     }
     _loadSetupDoctorState() {
       try {
@@ -10211,29 +10755,49 @@ ${recovered}`;
             add("fail", "Claude", this._errorMessage(err));
           }
         }
-        const required = [FIELDS.MEETING_URL];
-        const missing = required.filter((field) => !this._fieldById(this._mappedFieldId(field)));
-        if (missing.length) add("fail", "Fields", `Missing or invalid: ${missing.join(", ")}.`);
-        else add("pass", "Fields", "Meeting URL is bound; transcript and summary use the page body. Participants land on Attendees.");
-        const attendees = this._attendeesField();
-        if (!attendees) add("fail", "Attendees", "Choose a valid multi-record collection-link field in Field Mapping.");
-        else if (!this._settings.mapParticipantNamesToAttendees) add("warn", "Attendee matching", "Optional and turned off; Attendees remains available for manual links.");
-        else {
+        const managed = Array.from(
+          /** @type {Map<string, any>} */
+          this._managed.entries()
+        );
+        if (!managed.length) add("fail", "Collections", "Meetings manages no collection yet. Add or create one in the Collections tab.");
+        for (const [collGuid, entry] of managed) {
+          const name = this._collectionName(collGuid);
+          const binding = entry.binding;
+          const urlId = binding.meetingUrlFieldId;
+          if (urlId) {
+            if (this._fieldById(collGuid, urlId)) add("pass", "Meeting URL", `${name}: reading the meeting link from ${this._fieldLabel(collGuid, urlId)}.`);
+            else add("fail", "Meeting URL", `${name}: the mapped property no longer exists. Re-pick it in Collections.`);
+          } else if (binding.role === "owned") {
+            if (this._meetingUrlFieldIds(collGuid).some((id) => this._fieldById(collGuid, id))) {
+              add("pass", "Meeting URL", `${name}: auto-detected. Transcript and summary use the page body.`);
+            } else add("fail", "Meeting URL", `${name}: no url property to read the meeting link from. Create one in Collections.`);
+          } else {
+            add("fail", "Meeting URL", `${name}: hosted collections never guess \u2014 choose the property holding the meeting link in Collections, or Meetings stays inert here.`);
+          }
+          for (const id of HOSTED_FIELD_IDS) {
+            if (this._fieldById(collGuid, id)) continue;
+            add("fail", "Bot properties", `${name}: ${FIELD_DEFS[id].label} is missing. Re-add the collection in Collections to create it.`);
+          }
+          const attendees = findAttendeesRelationField(this._collectionFields(collGuid), binding.attendeesFieldId);
+          if (!attendees) {
+            add("warn", "Attendees", `${name}: no multi-record collection-link property, so the roster is not written. Pick or create one in Collections.`);
+            continue;
+          }
+          if (!this._settings.mapParticipantNamesToAttendees) {
+            add("warn", "Attendee matching", "Optional and turned off; Attendees remains available for manual links.");
+            continue;
+          }
           const attendeesLabel = String(attendees.label || "Attendees");
           const peopleGuid = attendeesTargetCollectionGuid(attendees);
-          if (!peopleGuid) add("warn", "Attendee matching", `Matching will use an auto-detected People/Contacts collection if one exists, because ${attendeesLabel} is not limited to a single collection.`);
-          else {
-            if (!this._workspaceCollectionsLoaded) await this._loadWorkspaceCollections(true);
-            const target = this._collectionByGuid(peopleGuid);
-            if (target) {
-              let name = "the selected People collection";
-              try {
-                name = target.getName?.() || name;
-              } catch {
-              }
-              add("pass", "Attendee matching", `${attendeesLabel} is limited to ${name}; confident matches are linked silently. Unmatched names get a confirmation dialog after the meeting.`);
-            } else add("fail", "Attendee matching", `The collection restriction on ${attendeesLabel} points to an unavailable collection.`);
+          if (!peopleGuid) {
+            add("warn", "Attendee matching", `${name}: matching will use an auto-detected People/Contacts collection if one exists, because ${attendeesLabel} is not limited to a single collection.`);
+            continue;
           }
+          if (!this._workspaceCollectionsLoaded) await this._loadWorkspaceCollections(true);
+          const target = this._collectionByGuid(peopleGuid);
+          if (target) {
+            add("pass", "Attendee matching", `${name}: ${attendeesLabel} is limited to ${this._collectionName(peopleGuid)}; confident matches are linked silently. Unmatched names get a confirmation dialog after the meeting.`);
+          } else add("fail", "Attendee matching", `${name}: the collection restriction on ${attendeesLabel} points to an unavailable collection.`);
         }
         this._setupDoctorState = { checkedAt: Date.now(), results };
         this._saveSetupDoctorState(this._setupDoctorState);
@@ -10250,17 +10814,21 @@ ${recovered}`;
         this._renderPanel();
       }
     }
-    _attendeeMappingControls() {
+    /**
+     * Attendee matching: the global on/off pref plus THIS collection's Attendees property.
+     * @param {string} collectionGuid
+     */
+    _attendeeMappingControls(collectionGuid) {
       return [
         optionRow({
           type: "checkbox",
           name: "mapParticipantNamesToAttendees",
           label: "Match participants to Attendees",
-          desc: "Confident email or unique-name matches are linked silently. Unmatched people get a confirmation dialog after the meeting so you can set a full name and email before creating a Person.",
+          desc: "Matches by email or unique name. Unmatched people get a confirmation dialog after the meeting.",
           checked: !!this._draft.mapParticipantNamesToAttendees,
           onChange: /* @__PURE__ */ __name((event) => this._updateSetting("mapParticipantNamesToAttendees", !!event.target.checked, { rerender: true }), "onChange")
         }),
-        this._fieldSelectInput("Attendees field", "attendeesFieldId", ["record"], {
+        this._fieldSelectInput(collectionGuid, "Attendees property", "attendeesFieldId", ["record"], {
           filter: isAttendeesRelationField,
           emptyTypeLabel: "multi-record collection-link"
         })
@@ -10296,14 +10864,6 @@ ${recovered}`;
             }),
             optionRow({
               type: "checkbox",
-              name: "autoSchedule",
-              label: "Send the bot automatically to scheduled meetings",
-              desc: "When Date is far enough out (about 12 minutes, so the bot can join 2 minutes early), book the notetaker automatically. Cancel anytime.",
-              checked: !!draft.autoSchedule,
-              onChange: /* @__PURE__ */ __name((event) => this._updateSetting("autoSchedule", !!event.target.checked, { rerender: true }), "onChange")
-            }),
-            optionRow({
-              type: "checkbox",
               name: "sendJoinChatMessage",
               label: "Send join chat message",
               checked: !!draft.sendJoinChatMessage,
@@ -10314,21 +10874,236 @@ ${recovered}`;
         })
       ];
     }
-    _tabFieldMapping() {
+    /**
+     * Which collections Meetings manages, and how each one is wired.
+     *
+     * This replaces 1.x's Field Mapping tab: a mapping is meaningless without naming the collection
+     * it applies to now that there can be several.
+     */
+    _tabCollections() {
+      const bindings = this._bindings();
+      const guids = Object.keys(bindings);
+      if (guids.length && !bindings[this._selectedCollectionGuid]) this._selectedCollectionGuid = guids[0];
       return [
-        section({
-          label: "Field Mapping",
-          body: [
-            this._fieldSelectInput("Meeting URL field", "meetingUrlFieldId", ["url", "text"]),
-            this._fieldSelectInput("Date field", "joinAtFieldId", ["datetime", "date"]),
-            ...this._attendeeMappingControls(),
-            this._fieldSelectInput("Related field", "relatedFieldId", ["record"], {
-              filter: /* @__PURE__ */ __name((field) => !!field && field.active !== false && String(field.type || "").toLowerCase() === "record" && field.many === true, "filter"),
-              emptyTypeLabel: "multi-record collection-link"
-            })
-          ]
+        this._managedCollectionsSection(bindings, guids),
+        this._addCollectionSection(bindings),
+        ...this._selectedCollectionGuid && bindings[this._selectedCollectionGuid] ? [this._collectionMappingSection(this._selectedCollectionGuid, bindings[this._selectedCollectionGuid])] : [],
+        DEV_TOOLS ? this._settingsImportSection() : null
+      ].filter(Boolean);
+    }
+    /**
+     * @param {Record<string, any>} bindings
+     * @param {string[]} guids
+     */
+    _managedCollectionsSection(bindings, guids) {
+      return section({
+        label: "Managed collections",
+        hint: "Select a row to edit its field mapping.",
+        body: guids.length ? guids.map((guid) => this._collectionRow(guid, bindings[guid])) : [
+          h(
+            "span",
+            { class: `${ROOT_CLASS}-field-hint` },
+            "Nothing yet. Create a Meetings collection below, or add one you already have."
+          )
+        ]
+      });
+    }
+    /**
+     * @param {string} guid
+     * @param {any} binding
+     */
+    _collectionRow(guid, binding) {
+      const live = (
+        /** @type {Map<string, any>} */
+        this._managed.has(guid)
+      );
+      const selected = guid === this._selectedCollectionGuid;
+      const status = !live ? { level: "fail", text: "not found in this workspace" } : binding.meetingUrlFieldId || binding.role === "owned" ? { level: "pass", text: "ready" } : { level: "warn", text: "needs a meeting URL property" };
+      return h(
+        "div",
+        {
+          class: `${ROOT_CLASS}-coll-row${selected ? ` ${ROOT_CLASS}-coll-row--selected` : ""}`
+        },
+        h(
+          "button",
+          {
+            type: "button",
+            class: `${ROOT_CLASS}-coll-pick`,
+            "aria-pressed": selected ? "true" : "false",
+            onClick: /* @__PURE__ */ __name(() => {
+              this._selectedCollectionGuid = guid;
+              this._savePanelPlace();
+              this._renderPanel();
+            }, "onClick")
+          },
+          h("span", { class: `${ROOT_CLASS}-coll-name` }, this._collectionName(guid)),
+          h("span", { class: `${ROOT_CLASS}-coll-role` }, binding.role === "owned" ? "Meetings collection" : "Hosted"),
+          h("span", { class: `${ROOT_CLASS}-coll-status ${ROOT_CLASS}-coll-status--${status.level}` }, status.text)
+        ),
+        button({
+          label: "Remove",
+          variant: "ghost",
+          size: "sm",
+          onClick: /* @__PURE__ */ __name(() => void this._removeBinding(guid), "onClick")
         })
-      ];
+      );
+    }
+    /**
+     * Drop a collection from the managed list. The binding only — the collection, its properties,
+     * and every transcript already written stay exactly where they are.
+     * @param {string} guid
+     */
+    async _removeBinding(guid) {
+      const name = this._collectionName(guid);
+      const ok = await this._confirmBodyWrite({
+        title: "Stop managing this collection",
+        body: {
+          intro: `Meetings will stop watching ${name}. This removes the binding only:`,
+          items: [
+            "The collection, its records, and every transcript and summary already written stay untouched",
+            "The Bot ID / Bot Status / Last Error properties stay, with their values",
+            "No bot is cancelled \u2014 stop a running notetaker first if you need to"
+          ],
+          outro: "You can add it again at any time; its field mapping is forgotten."
+        },
+        confirmLabel: "Stop managing"
+      });
+      if (!ok) return false;
+      if (this._selectedCollectionGuid === guid) this._selectedCollectionGuid = "";
+      this._savePanelPlace();
+      return this._saveBinding(guid, null);
+    }
+    /** @param {Record<string, any>} bindings */
+    _addCollectionSection(bindings) {
+      const available = (this._workspaceCollections || []).filter((collection) => {
+        try {
+          return !bindings[String(collection.getGuid())];
+        } catch {
+          return false;
+        }
+      });
+      const options = [["", "Add an existing collection\u2026"]];
+      for (const collection of available) {
+        try {
+          options.push([String(collection.getGuid()), String(collection.getName ? collection.getName() : collection.getGuid())]);
+        } catch {
+        }
+      }
+      return section({
+        label: "Add a collection",
+        hint: "Hosted mode: adds only Bot ID, Bot Status and Last Error, reads only the mapped link property, never seeds headings or books bots.",
+        body: [
+          h(
+            "label",
+            { class: `${ROOT_CLASS}-field` },
+            h("span", { class: `${ROOT_CLASS}-field-label` }, "Existing collection"),
+            this._dropdown({
+              value: "",
+              placeholder: "Add an existing collection\u2026",
+              options: options.filter(([value]) => value !== ""),
+              onChange: /* @__PURE__ */ __name((guid) => {
+                if (guid) void this._addHostedCollection(guid);
+              }, "onChange")
+            }),
+            h(
+              "span",
+              { class: `${ROOT_CLASS}-field-hint` },
+              available.length ? "" : "Every collection in this workspace is already managed."
+            )
+          ),
+          h(
+            "div",
+            { class: `${ROOT_CLASS}-field` },
+            button({
+              label: this._createCollectionInFlight ? "Creating\u2026" : "Create a Meetings collection",
+              variant: "ghost",
+              size: "md",
+              disabled: !!this._createCollectionInFlight,
+              onClick: /* @__PURE__ */ __name(() => void this._createMeetingsCollection(), "onClick")
+            }),
+            h(
+              "span",
+              { class: `${ROOT_CLASS}-field-hint` },
+              "Full Meetings schema: auto-detected links, seeded headings, automatic booking."
+            )
+          )
+        ]
+      });
+    }
+    /**
+     * Adopt a foreign collection. The three integration properties go in FIRST — a binding whose
+     * collection has no `recall_status` has nowhere to put a status and no row button to show.
+     * @param {string} guid
+     */
+    async _addHostedCollection(guid) {
+      const saved = await this._saveBinding(guid, newBinding("hosted"));
+      if (!saved) return false;
+      await this._ensureHostedFields(guid);
+      this._selectedCollectionGuid = guid;
+      this._savePanelPlace();
+      this._toast("Collection added", `Choose the property holding the meeting link for ${this._collectionName(guid)} \u2014 until then Meetings stays inert there.`);
+      if (this._panelEl && document.contains(this._panelEl)) this._renderPanel();
+      return true;
+    }
+    /** Create a brand-new Meetings collection and own it. Writes no collection CODE — only config. */
+    async _createMeetingsCollection() {
+      if (this._createCollectionInFlight) return this._createCollectionInFlight;
+      const task = (async () => {
+        try {
+          const api = await this.data.createCollection();
+          if (!api || typeof api.saveConfiguration !== "function") throw new Error("Thymer did not create a collection.");
+          const guid = String(api.getGuid());
+          const ok = await api.saveConfiguration(
+            /** @type {any} */
+            { ...api.getConfiguration?.() || {}, ...MEETINGS_COLLECTION_TEMPLATE }
+          );
+          if (ok === false) throw new Error("Thymer rejected the collection template.");
+          await this._loadWorkspaceCollections(true);
+          await this._saveBinding(guid, newBinding("owned"));
+          this._selectedCollectionGuid = guid;
+          this._savePanelPlace();
+          this._toast("Meetings collection created", "Add a meeting link to a record and run Meetings: Join now.");
+        } catch (err) {
+          this._toast("Could not create the collection", this._errorMessage(err));
+        }
+      })();
+      this._createCollectionInFlight = task;
+      this._renderPanel();
+      try {
+        await task;
+      } finally {
+        if (this._createCollectionInFlight === task) this._createCollectionInFlight = null;
+        if (this._panelEl && document.contains(this._panelEl)) this._renderPanel();
+      }
+    }
+    /**
+     * @param {string} guid
+     * @param {any} binding
+     */
+    _collectionMappingSection(guid, binding) {
+      const name = this._collectionName(guid);
+      return section({
+        label: `Field mapping \u2014 ${name}`,
+        hint: binding.role === "owned" ? "Leave on Auto-detect to use the Meetings property of that name." : "Hosted: nothing is guessed. The first link in the chosen property is used.",
+        body: [
+          this._fieldSelectInput(guid, "Meeting URL property", "meetingUrlFieldId", ["url", "text"]),
+          this._fieldSelectInput(guid, "Date property", "joinAtFieldId", ["datetime", "date"]),
+          ...this._attendeeMappingControls(guid),
+          this._fieldSelectInput(guid, "Related property", "relatedFieldId", ["record"], {
+            filter: /* @__PURE__ */ __name((field) => !!field && field.active !== false && String(field.type || "").toLowerCase() === "record" && field.many === true, "filter"),
+            emptyTypeLabel: "multi-record collection-link"
+          }),
+          optionRow({
+            type: "checkbox",
+            name: `autoSchedule-${guid}`,
+            label: "Send the bot automatically to scheduled meetings",
+            desc: "Books the notetaker when Date is 12+ minutes out; it joins 2 minutes early. Off by default on hosted collections.",
+            checked: !!binding.autoSchedule,
+            onChange: /* @__PURE__ */ __name((event) => void this._saveBinding(guid, { autoSchedule: !!event.target.checked }), "onChange")
+          }),
+          ...DEV_TOOLS ? [this._clearOldCodeControl(guid)] : []
+        ].filter(Boolean)
+      });
     }
     /** @param {any} draft */
     _tabTranscripts(draft) {
@@ -10416,7 +11191,7 @@ ${recovered}`;
         }),
         section({
           label: "Body outline",
-          hint: "Order of the four headings on new meeting records. Existing meetings keep their content until you run Apply to existing meetings in Setup \u2192 Diagnostics.",
+          hint: "Heading order for new meetings. Apply to existing ones from Setup \u2192 Diagnostics.",
           body: [
             this._textInput(
               "Section order",
@@ -10441,7 +11216,7 @@ ${recovered}`;
           }),
           section({
             label: "Citations",
-            hint: "Label on new summary citation chips. The arrow is Thymer\u2019s link chrome and cannot be removed. Existing chips keep their original label until the meeting is summarized again.",
+            hint: "Label on new citation chips. Existing chips update on the next summary.",
             body: [
               this._selectInput("Citation label", "citationStyle", CITATION_STYLE_OPTIONS)
             ]
@@ -10567,30 +11342,30 @@ ${recovered}`;
           {},
           "Put the bridge online \u2014 it is free, takes about two minutes, and needs no terminal. ",
           link(this._bridgeWorkerUrl(), "Follow the bridge guide"),
-          ". Thymer runs inside your browser, and browsers are not allowed to call Recall or Claude directly. The bridge is a tiny helper that passes those requests along for you."
+          ". Browsers cannot call Recall or Claude directly; the bridge passes requests along."
         ),
         h("li", {}, "Paste the bridge address and both keys into Connection, just below."),
         h(
           "li",
           {},
           h("strong", {}, "Optional \u2014 authenticate live transcript events: "),
-          "Recall sends each live transcript line to your bridge through a webhook while the meeting is running. Because that Worker endpoint is public, the secret lets it verify that every event was signed by Recall before it stores the row; this prevents forged transcript text and endpoint spam. It does not enable streaming\u2014the webhook works in compatibility mode without it. To enforce verification, in your ",
+          "Optional hardening: the bridge verifies that each live transcript event was signed by Recall. In your ",
           link(this._recallKeyUrl(), "Recall API Keys & Secrets page"),
-          ", click Create Workspace Secret. In Cloudflare, open your Worker \u2192 Settings \u2192 Variables and Secrets, add an encrypted secret named exactly ",
+          ", click Create Workspace Secret. In Cloudflare \u2192 Worker \u2192 Settings \u2192 Variables and Secrets, add an encrypted secret named ",
           copyCode("RECALL_WORKSPACE_VERIFICATION_SECRET"),
-          ", paste the Recall value, and redeploy the Worker. Run Setup Doctor again; Live transcript security should say the public endpoint accepts only Recall-signed events. ",
+          ", paste the value, redeploy, then run Setup Doctor again. ",
           link("https://docs.recall.ai/docs/authenticating-requests-from-recallai", "Recall\u2019s verification guide"),
           "."
         ),
         h(
           "li",
           {},
-          "Add a meeting link to a Meeting record and click Join Now \u2014 the notetaker walks in straight away. If you also set a Date far enough out, the button becomes Schedule Bot instead and Recall sends the notetaker in two minutes before the meeting starts. Either way the transcript arrives as people talk, and the summary is written once the meeting ends."
+          "Put a meeting link on a record and click Join Now. With a Date 12+ minutes out the bot is booked and joins 2 minutes early. The transcript streams live; the summary is written when the meeting ends."
         ),
         h(
           "li",
           {},
-          "Optional: Attendees matching is on by default. Restrict the Attendees relation to your People or Contacts collection for the tightest matches, or leave it unrestricted and the plugin will auto-detect a People/Contacts collection. \u201CCreate missing People records when mapping\u201D can add unmatched named participants."
+          "Optional: restrict the Attendees relation to your People collection for the tightest matching."
         )
       );
     }
@@ -10731,6 +11506,48 @@ ${recovered}`;
       );
     }
     /**
+     * A dropdown that belongs to the interface: a control-shaped trigger that opens Thymer's own
+     * menu (ui.createDropdown). Native selects pop the operating system's list, which no CSS can
+     * style, so they are never used in the panel.
+     *
+     * @param {{ value: string, options: [string, string][], onChange: (value: string) => void, placeholder?: string }} args
+     */
+    _dropdown({ value, options, onChange, placeholder = "Choose\u2026" }) {
+      const current = options.find(([v]) => v === value);
+      const text = current ? current[1] : placeholder;
+      const trigger = h(
+        "button",
+        {
+          type: "button",
+          class: `${ROOT_CLASS}-select`,
+          "aria-haspopup": "listbox"
+        },
+        h("span", { class: `${ROOT_CLASS}-select__value${current ? "" : ` ${ROOT_CLASS}-select__value--empty`}` }, text),
+        h("i", { class: `ti ti-chevron-down ${ROOT_CLASS}-select__chevron`, "aria-hidden": "true" })
+      );
+      trigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          this.ui.createDropdown({
+            attachedTo: trigger,
+            width: Math.max(220, Math.round(trigger.getBoundingClientRect().width)),
+            inputPlaceholder: "Filter\u2026",
+            options: options.map(([v, label]) => ({
+              label,
+              icon: v === value ? "check" : void 0,
+              onSelected: /* @__PURE__ */ __name(() => {
+                if (v !== value) onChange(v);
+              }, "onSelected")
+            }))
+          });
+        } catch (err) {
+          this._log("dropdown failed", { error: this._errorMessage(err) });
+        }
+      });
+      return trigger;
+    }
+    /**
      * @param {string} label
      * @param {string} key
      * @param {any} options
@@ -10745,11 +11562,14 @@ ${recovered}`;
         "label",
         { class: `${ROOT_CLASS}-field` },
         h("span", { class: `${ROOT_CLASS}-field-label` }, label),
-        h("select", {
-          value: current,
-          onChange: /* @__PURE__ */ __name((event) => onChange ? onChange(event.target.value) : this._updateSetting(key, event.target.value, { rerender: true }), "onChange")
-        }, .../** @type {[string, string][]} */
-        options.map(([value, optionLabel]) => h("option", { value, selected: current === value }, optionLabel))),
+        this._dropdown({
+          value: String(current || ""),
+          options: (
+            /** @type {[string, string][]} */
+            options
+          ),
+          onChange: /* @__PURE__ */ __name((v) => onChange ? onChange(v) : this._updateSetting(key, v, { rerender: true }), "onChange")
+        }),
         hint ? h("span", { class: `${ROOT_CLASS}-field-hint` }, hint) : null
       );
     }
@@ -10767,14 +11587,14 @@ ${recovered}`;
         "label",
         { class: `${ROOT_CLASS}-field` },
         h("span", { class: `${ROOT_CLASS}-field-label` }, label),
-        h("select", {
-          value: current,
-          onChange: /* @__PURE__ */ __name((event) => this._updateSetting(key, event.target.value, { rerender: true }), "onChange")
-        }, ...(Array.isArray(groups) ? groups : []).map((group) => h(
-          "optgroup",
-          { label: group.label },
-          ...(Array.isArray(group.options) ? group.options : []).map(([value, optionLabel]) => h("option", { value, selected: current === value }, optionLabel))
-        )))
+        this._dropdown({
+          value: String(current || ""),
+          options: (Array.isArray(groups) ? groups : []).flatMap((group) => (Array.isArray(group.options) ? group.options : []).map(([value, optionLabel]) => (
+            /** @type {[string, string]} */
+            [value, group.label ? `${group.label} \xB7 ${optionLabel}` : optionLabel]
+          ))),
+          onChange: /* @__PURE__ */ __name((v) => this._updateSetting(key, v, { rerender: true }), "onChange")
+        })
       );
     }
     /**
@@ -10790,81 +11610,103 @@ ${recovered}`;
       return this._selectInput(label, key, options);
     }
     /**
-     * Add the canonical property to this collection, for the case the dropdown exists to solve:
+     * Add a canonical property to a MANAGED collection, for the case the dropdown exists to solve:
      * the collection simply has no property of the right type, so Auto-detect finds nothing and
      * there is nothing to pick. Offering only a list of unusable properties is a dead end.
      *
-     * It is created under its CANONICAL id, so Auto-detect picks it up with no mapping to set.
+     * Why this has to be code and not a README: Thymer assigns user-created properties an opaque
+     * random id (e.g. "f66F2VNR6YHHQAZ"), so a human can NEVER hand-make a property whose id is
+     * `meeting_url`. Writing the config ourselves is the only way those ids can exist.
+     *
      * `saveConfiguration` reloads the plugin; the panel re-mounts itself in `onLoad`.
+     *
+     * @param {string} collectionGuid
+     * @param {string} canonicalId
      */
-    /** @param {any} canonicalId */
-    async _createCollectionField(canonicalId) {
-      return queuePluginConfigWrite(this, () => this._createCollectionFieldNow(canonicalId));
-    }
-    /** @param {string} canonicalId */
-    async _createCollectionFieldNow(canonicalId) {
+    async _createCollectionField(collectionGuid, canonicalId) {
       const def = FIELD_DEFS[canonicalId];
       if (!def) return;
-      try {
-        const api = await resolveConfigApi(this);
-        if (!api || typeof api.saveConfiguration !== "function") {
-          throw new Error("Thymer did not hand over a writable config handle.");
-        }
-        const live = api.getConfiguration?.() || this.getConfiguration?.() || {};
-        const conf = JSON.parse(JSON.stringify(live));
-        conf.fields = Array.isArray(conf.fields) ? conf.fields : [];
-        if (conf.fields.some((field) => String(field.id) === canonicalId)) return;
-        conf.fields.push({ ...def });
-        if (Array.isArray(conf.page_field_ids) && !conf.page_field_ids.includes(canonicalId)) {
-          conf.page_field_ids.push(canonicalId);
-        }
-        const table = (conf.views || []).find((view) => String(view.type || "") === "table");
-        if (table && Array.isArray(table.field_ids) && !table.field_ids.includes(canonicalId)) {
-          table.field_ids.push(canonicalId);
-        }
-        const ok = await api.saveConfiguration(conf);
-        if (ok === false) throw new Error("Thymer rejected the change.");
-        this._toast(`Added "${def.label}"`, "Auto-detect will use it from now on.");
-      } catch (err) {
-        this._toast(`Could not add "${def.label}"`, this._errorMessage(err));
+      const api = this._managedApi(collectionGuid) || this._collectionByGuid(collectionGuid);
+      if (!api || typeof api.saveConfiguration !== "function") {
+        this._toast(`Could not add "${def.label}"`, "Thymer did not hand over a writable config handle for that collection.");
+        return;
       }
+      return queuePluginConfigWrite(api, async () => {
+        try {
+          const live = api.getConfiguration?.() || {};
+          const conf = JSON.parse(JSON.stringify(live));
+          conf.fields = Array.isArray(conf.fields) ? conf.fields : [];
+          if (conf.fields.some((field) => String(field.id) === canonicalId)) return;
+          conf.fields.push({ ...def });
+          this._ensureFieldVisible(conf, [canonicalId]);
+          const ok = await api.saveConfiguration(conf);
+          if (ok === false) throw new Error("Thymer rejected the change.");
+          this._toast(`Added "${def.label}"`, `It is now available on ${this._collectionName(collectionGuid)}.`);
+        } catch (err) {
+          this._toast(`Could not add "${def.label}"`, this._errorMessage(err));
+        }
+      });
+    }
+    /** A property's user-visible label on a managed collection, falling back to its id. */
+    /**
+     * @param {string} collectionGuid
+     * @param {string} fieldId
+     */
+    _fieldLabel(collectionGuid, fieldId) {
+      const field = this._fieldById(collectionGuid, fieldId);
+      return String(field && field.label || fieldId || "");
     }
     /**
+     * One property picker, bound to a COLLECTION BINDING rather than to the prefs draft: which
+     * property holds the meeting link is a fact about one collection, not a preference.
+     *
+     * @param {string} collectionGuid
      * @param {string} label
-     * @param {string} key
+     * @param {string} key a binding mapping key
      * @param {any} types
      * @param {{filter?: any, emptyTypeLabel?: string}} [opts]
      */
-    _fieldSelectInput(label, key, types, { filter, emptyTypeLabel } = {}) {
+    _fieldSelectInput(collectionGuid, label, key, types, { filter, emptyTypeLabel } = {}) {
+      const binding = (
+        /** @type {any} */
+        this._bindings()[collectionGuid] || newBinding("hosted")
+      );
       const allowed = new Set((types || []).map((type) => String(type).toLowerCase()));
-      const fields = this._collectionFields().filter((field) => {
+      const fields = this._collectionFields(collectionGuid).filter((field) => {
         if (allowed.size && !allowed.has(String(field.type || "").toLowerCase())) return false;
         return typeof filter !== "function" || filter(field);
       });
-      const options = [["", "Auto-detect"]];
+      const options = [["", binding.role === "owned" ? "Auto-detect" : "Not mapped"]];
       for (const field of fields) {
         options.push([field.id, `${field.label || field.id} (${field.id})`]);
       }
-      const current = this._draft[key] || "";
+      const current = String(binding[key] || "");
       if (current && !options.some(([value]) => value === current)) options.push([current, current]);
       const canonical = CANONICAL_FIELD_FOR_SETTING[
         /** @type {keyof typeof CANONICAL_FIELD_FOR_SETTING} */
         key
       ] || "";
       const def = canonical ? FIELD_DEFS[canonical] : null;
-      const missing = !!def && !this._fieldById(canonical);
+      const missing = !!def && !this._fieldById(collectionGuid, canonical);
       if (missing) options.push([CREATE_FIELD_OPTION, `Create a "${def.label}" property\u2026`]);
-      return this._selectInput(label, key, options, {
-        onChange: /* @__PURE__ */ __name((value) => {
-          if (value === CREATE_FIELD_OPTION) {
-            void this._createCollectionField(canonical);
-            this._renderPanel();
-            return;
-          }
-          this._updateSetting(key, value, { rerender: true });
-        }, "onChange"),
-        hint: missing && !fields.length ? `This collection has no ${emptyTypeLabel || (types || []).join(" or ")} property for Recall.ai to use. Create one above.` : ""
-      });
+      return h(
+        "label",
+        { class: `${ROOT_CLASS}-field` },
+        h("span", { class: `${ROOT_CLASS}-field-label` }, label),
+        this._dropdown({
+          value: current,
+          options,
+          onChange: /* @__PURE__ */ __name((value) => {
+            if (value === CREATE_FIELD_OPTION) return void this._createCollectionField(collectionGuid, canonical);
+            void this._saveBinding(collectionGuid, { [key]: value });
+          }, "onChange")
+        }),
+        missing && !fields.length ? h(
+          "span",
+          { class: `${ROOT_CLASS}-field-hint` },
+          `This collection has no ${emptyTypeLabel || (types || []).join(" or ")} property Meetings can use. Create one from the list above.`
+        ) : null
+      );
     }
     /**
      * @param {string} label
@@ -10958,6 +11800,15 @@ ${recovered}`;
 				gap: 6px;
 				align-items: center;
 			}
+			.${ROOT_CLASS}__pagebtn {
+				flex: none;
+			}
+			.${ROOT_CLASS}__pagebtn:hover,
+			.${ROOT_CLASS}__pagebtn:focus-visible {
+				background: color-mix(in srgb, var(--tps-text, currentColor) 12%, transparent);
+				outline: 2px solid color-mix(in srgb, var(--tps-text, currentColor) 45%, transparent);
+				outline-offset: 1px;
+			}
 			.${ROOT_CLASS}__inline-button {
 				display: inline-flex;
 				align-items: center;
@@ -10986,85 +11837,102 @@ ${recovered}`;
 				box-shadow: 0 0 0 2px color-mix(in srgb, var(--tps-text, currentColor) 28%, transparent);
 				outline: none;
 			}
-			.${ROOT_CLASS}__cell {
-				display: inline-flex;
+			/* Managed-collection rows in the Collections tab. Full-perimeter borders only \u2014
+			   a single-edge accent bar is never used to mark the selected row. */
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-row {
+				display: flex;
 				align-items: center;
 				gap: 8px;
-				min-width: 0;
+				padding: 6px 8px;
+				border: 1px solid var(--tps-divider);
+				border-radius: var(--tps-radius-md, 6px);
+				background: var(--tps-bg-input);
 			}
-			.${ROOT_CLASS}__cell-status {
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-row + .${ROOT_CLASS}-coll-row {
+				margin-top: 6px;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-row--selected {
+				border-color: color-mix(in srgb, var(--tps-accent) 55%, transparent);
+				background: color-mix(in srgb, var(--tps-accent) 10%, transparent);
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-pick {
+				flex: 1 1 auto;
+				display: flex;
+				align-items: baseline;
+				gap: 10px;
+				min-width: 0;
+				padding: 0;
+				font: inherit;
+				text-align: left;
+				color: var(--tps-text);
+				background: transparent;
+				border: 0;
+				cursor: pointer;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-name {
+				flex: 0 1 auto;
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
-				color: var(--text-muted, currentColor);
+				font-size: var(--tps-fs-label);
+				font-weight: var(--tps-fw-medium);
 			}
-			.${ROOT_CLASS}__cell-button {
-				flex: none;
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-role,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-status {
+				flex: 0 0 auto;
+				font-size: var(--tps-fs-hint);
+				color: var(--tps-text-muted);
 			}
-			.${ROOT_CLASS}__cell-button:hover,
-			.${ROOT_CLASS}__cell-button:focus-visible {
-				background: color-mix(in srgb, var(--tps-text, currentColor) 12%, transparent);
-				outline: 2px solid color-mix(in srgb, var(--tps-text, currentColor) 45%, transparent);
-				outline-offset: 1px;
-			}
-			/* Icon is a direct child of the nav button now (no wrapper) \u2014 space it from the text the way
-			   Thymer's own view buttons do, with an inline margin rather than a flex gap. */
-			.${ROOT_CLASS}__nav-ico {
-				font-size: 13px;
-				line-height: 1;
-				margin-right: 5px;
-				vertical-align: middle;
-			}
-			/* Recording: the mic blinks red, on and off, like a record light. */
-			.${ROOT_CLASS}__nav-mic {
-				color: var(--tps-danger);
-				animation: ${ROOT_CLASS}-mic-flash 1.3s steps(1, end) infinite;
-			}
-			.${ROOT_CLASS}__nav-spinner {
-				width: 12px;
-				height: 12px;
-				border: 2px solid currentColor;
-				border-right-color: transparent;
-				border-radius: 999px;
-				animation: ${ROOT_CLASS}-spin 0.85s linear infinite;
-			}
-			@keyframes ${ROOT_CLASS}-mic-flash {
-				0%, 49% { opacity: 1; }
-				50%, 100% { opacity: 0.2; }
-			}
-			@keyframes ${ROOT_CLASS}-spin {
-				to { transform: rotate(360deg); }
-			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-status--warn { color: var(--tps-warning, #d97706); }
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-status--fail { color: var(--tps-danger); }
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-status--pass { color: var(--tps-success, #10b981); }
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field {
 				display: grid;
 				gap: 6px;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field-label {
-				color: var(--tps-text);
-				font-size: var(--tps-fs-label);
-				font-weight: var(--tps-fw-medium);
+				color: var(--tps-text, inherit);
+				font-size: 13px;
+				font-weight: 500;
+				line-height: 1.3;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field-hint {
-				color: var(--tps-text-muted);
-				font-size: var(--tps-fs-hint);
+				color: color-mix(in srgb, currentColor 58%, transparent);
+				font-size: 12px;
+				line-height: 1.45;
+				margin-top: 2px;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field-hint a {
 				color: var(--tps-accent);
 				text-decoration: underline;
 				text-underline-offset: 2px;
 			}
+			/* Costs: one row per line item \u2014 name and estimate on the first line, the pricing detail
+			   underneath at full width \u2014 so a narrow panel wraps sentences, not single words. */
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-cost-grid {
 				display: grid;
-				grid-template-columns: max-content max-content minmax(0, 1fr);
-				align-items: baseline;
-				column-gap: var(--tps-space-4);
-				row-gap: var(--tps-space-3);
+				grid-template-columns: minmax(0, 1fr);
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-cost-row {
-				display: contents;
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto;
+				column-gap: 16px;
+				row-gap: 3px;
+				align-items: baseline;
+				padding: 10px 0;
+				border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-cost-row:first-child {
+				border-top: 0;
+				padding-top: 0;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-cost-estimate {
+				color: var(--tps-text, inherit);
+				text-align: right;
 				white-space: nowrap;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-cost-detail {
+				grid-column: 1 / -1;
 			}
 			/* The native file input is hidden, not removed \u2014 it still does the picking. */
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-file-native {
@@ -11091,20 +11959,20 @@ ${recovered}`;
 				font: inherit;
 				font-size: var(--tps-fs-button, 12px);
 				font-weight: var(--tps-fw-medium, 500);
-				color: var(--tps-success, #10b981);
-				background: var(--tps-success-soft, color-mix(in srgb, var(--tps-success, #10b981) 12%, transparent));
-				border: 1px solid color-mix(in srgb, var(--tps-success, #10b981) 45%, transparent);
+				color: var(--tps-text, inherit);
+				background: color-mix(in srgb, currentColor 6%, transparent);
+				border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
 				border-radius: var(--tps-radius-sm, 4px);
 				cursor: pointer;
 				transition: background-color var(--tps-dur-fast, 80ms) var(--tps-ease-out, ease),
 				            border-color var(--tps-dur-fast, 80ms) var(--tps-ease-out, ease);
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-upload:hover {
-				background: color-mix(in srgb, var(--tps-success, #10b981) 20%, transparent);
-				border-color: color-mix(in srgb, var(--tps-success, #10b981) 70%, transparent);
+				background: color-mix(in srgb, currentColor 11%, transparent);
+				border-color: color-mix(in srgb, currentColor 34%, transparent);
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-upload:focus-visible {
-				outline: 2px solid var(--tps-success, #10b981);
+				outline: 2px solid var(--tps-accent, #04d1ab);
 				outline-offset: 2px;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-upload-icon {
@@ -11218,12 +12086,9 @@ ${recovered}`;
 				box-shadow: 0 0 0 2px color-mix(in srgb, var(--tps-text, currentColor) 26%, transparent);
 				outline: none;
 			}
+			/* Setup Doctor is a section like any other \u2014 no accent-tinted card of its own. */
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-card {
-				margin-top: var(--tps-space-4);
-				padding: var(--tps-space-4);
-				border: 1px solid color-mix(in srgb, var(--tps-accent) 34%, var(--tps-divider));
-				border-radius: var(--tps-radius-lg);
-				background: color-mix(in srgb, var(--tps-accent) 6%, var(--tps-bg-input));
+				margin-top: 0;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-label {
 				display: flex;
@@ -11242,33 +12107,44 @@ ${recovered}`;
 				border-color: color-mix(in srgb, var(--tps-text, currentColor) 50%, transparent);
 				box-shadow: 0 0 0 2px color-mix(in srgb, var(--tps-text, currentColor) 26%, transparent);
 			}
+			/* Setup Doctor results are a list, not cards: hairline dividers between rows, a real icon
+			   size, the check name in the text color and the message muted. */
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-results {
-				display: grid;
-				gap: 7px;
+				display: block;
+				padding-left: 12px;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-result {
 				display: flex;
 				align-items: flex-start;
-				gap: 8px;
-				padding: 8px 10px;
-				border: 1px solid var(--tps-divider);
-				border-radius: var(--tps-radius-sm, 4px);
+				gap: 12px;
+				padding: 11px 0;
+				border: 0;
+				border-top: 1px solid var(--tps-divider);
 				color: var(--tps-text-muted);
-				font-size: var(--tps-fs-hint);
-				line-height: 1.4;
+				font-size: 12.5px;
+				line-height: 1.45;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-result:first-child {
+				border-top: 0;
+				padding-top: 4px;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-result strong {
+				color: var(--tps-text);
+				font-weight: 600;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-result > i {
-				flex: 0 0 14px;
-				width: 14px;
-				margin-top: 2px;
+				flex: 0 0 20px;
+				width: 20px;
+				font-size: 20px;
+				line-height: 1;
+				margin-top: -1px;
 				text-align: center;
 			}
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-result--pass i { color: var(--tps-success, #10b981); }
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-result--warn i { color: var(--tps-warning, #f59e0b); }
 			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-result--fail i { color: var(--tps-danger, #ef4444); }
-			.${ROOT_CLASS}-panel input,
-			.${ROOT_CLASS}-panel textarea,
-			.${ROOT_CLASS}-panel select {
+			.${ROOT_CLASS}-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]),
+			.${ROOT_CLASS}-panel textarea {
 				width: 100%;
 				border: 1px solid var(--tps-divider);
 				border-radius: var(--tps-radius-sm);
@@ -11283,9 +12159,8 @@ ${recovered}`;
 				min-height: 76px;
 				line-height: 1.4;
 			}
-			.${ROOT_CLASS}-panel input:focus,
-			.${ROOT_CLASS}-panel textarea:focus,
-			.${ROOT_CLASS}-panel select:focus {
+			.${ROOT_CLASS}-panel input:not([type="checkbox"]):not([type="radio"]):focus,
+			.${ROOT_CLASS}-panel textarea:focus {
 				outline: none;
 				border-color: var(--tps-accent);
 			}
@@ -11471,6 +12346,225 @@ ${recovered}`;
 				background: color-mix(in srgb, var(--tps-accent) 86%, #fff);
 				box-shadow: 0 0 0 2px color-mix(in srgb, var(--tps-accent) 42%, transparent);
 				outline: none;
+			}
+
+			/* \u2500\u2500 Panel hierarchy (kept last so it wins over the shared primitives) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+			   One text column: every title, label, hint and checkbox is indented by the same 12px the
+			   controls pad their own text with, so all text shares a left edge while the control boxes
+			   span the card. Every color is a design-system token (which resolve to Thymer's theme
+			   variables): card = hover surface, control = input surface with the strong border. */
+			/* Accent follows the active THEME (its --color-primary-500), not the fixed logo teal the shared
+			   panel token defaults to. Declared on the panel root at the same specificity as the token block
+			   and injected after it, so every accent-derived token (soft, strong) recomputes from it. */
+			.tps-panel.${ROOT_CLASS}-panel {
+				--tps-accent: var(--color-primary-500, var(--logo-color, #04d1ab));
+				/* Secondary text levels as fixed fractions of the text color: the theme's own subtle and
+				   disabled tokens land anywhere from near-text to invisible, so they cannot carry a ladder. */
+				--tps-text-muted: color-mix(in srgb, var(--tps-text) 74%, transparent);
+				--tps-text-faint: color-mix(in srgb, var(--tps-text) 60%, transparent);
+				--tps-text-whisper: color-mix(in srgb, var(--tps-text) 50%, transparent);
+			}
+			.${ROOT_CLASS}-panel .tps-tabs {
+				margin: 18px 0 18px;
+				border-radius: 4px;
+			}
+			.${ROOT_CLASS}-panel .tps-section {
+				background: var(--tps-bg-hover);
+				border: 1px solid var(--tps-divider);
+				border-radius: 4px;
+				padding: 20px 16px 22px;
+			}
+			.${ROOT_CLASS}-panel .tps-section + .tps-section {
+				margin-top: 18px;
+				padding-top: 20px;
+				border-top: 1px solid var(--tps-divider);
+			}
+			.${ROOT_CLASS}-panel .tps-section-label {
+				font-size: 16px;
+				line-height: 1.3;
+				font-weight: 600;
+				letter-spacing: 0;
+				text-transform: none;
+				color: var(--tps-text);
+				margin: 0 0 6px;
+				padding-left: 12px;
+			}
+			.${ROOT_CLASS}-panel .tps-section-hint {
+				font-size: 12.5px;
+				line-height: 1.5;
+				color: var(--tps-text-faint);
+				margin: 0 0 24px;
+				padding-left: 12px;
+			}
+			.${ROOT_CLASS}-panel .tps-section-body {
+				gap: 26px;
+				margin-top: 22px;
+			}
+			.${ROOT_CLASS}-panel .tps-section-hint + .tps-section-body {
+				margin-top: 0;
+			}
+			.${ROOT_CLASS}-panel .tps-section-body:has(> .tps-opt) {
+				gap: 12px;
+			}
+			/* Sub-headers sit one step below the title on the text ladder \u2014 never the accent, which is
+			   reserved for interactive states. */
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field-label {
+				color: var(--tps-text-muted);
+				font-size: 12.5px;
+				font-weight: 600;
+				letter-spacing: 0.01em;
+				padding-left: 12px;
+				margin-bottom: 2px;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field {
+				gap: 8px;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field-hint,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-collection-note,
+			.${ROOT_CLASS}-panel .tps-opt-desc {
+				font-size: 12px;
+				line-height: 1.45;
+				color: var(--tps-text-faint);
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field-hint,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-collection-note {
+				padding-left: 12px;
+			}
+			/* Controls sit on the input surface with the strong border so they read as things you
+			   can operate, not as more card. */
+			.${ROOT_CLASS}-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]),
+			.${ROOT_CLASS}-panel textarea,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-select {
+				padding-left: 12px;
+				padding-right: 12px;
+				color: var(--tps-text);
+				background-color: var(--tps-bg-input);
+				border: 1px solid var(--tps-border-strong);
+				border-radius: var(--tps-radius-md, 6px);
+			}
+			.${ROOT_CLASS}-panel input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):focus,
+			.${ROOT_CLASS}-panel textarea:focus,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-select:focus-visible {
+				border-color: var(--tps-accent);
+				outline: none;
+			}
+			/* Dropdowns are Thymer's own menu (ui.createDropdown) behind a trigger that looks like every
+			   other control: value on the left, chevron inset 16px on the right. Never a native select. */
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-select {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 12px;
+				width: 100%;
+				min-height: 34px;
+				padding-right: 16px;
+				font: inherit;
+				font-size: var(--tps-fs-body);
+				text-align: left;
+				cursor: pointer;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-select:hover {
+				border-color: var(--tps-text-faint);
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-select__value {
+				flex: 1 1 auto;
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-select__value--empty {
+				color: var(--tps-text-faint);
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-select__chevron {
+				flex: 0 0 auto;
+				font-size: 14px;
+				color: var(--tps-text-muted);
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-doctor-results {
+				margin-top: 16px;
+			}
+			/* Meta lines (timestamps, empty states): quieter than hints, never body copy. */
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-meta {
+				display: block;
+				font-size: 11.5px;
+				line-height: 1.4;
+				color: var(--tps-text-whisper, var(--tps-text-faint));
+				padding-left: 12px;
+				margin-top: 6px;
+			}
+			/* Checkbox rows start on the text column like everything else; no hover slab. */
+			.${ROOT_CLASS}-panel .tps-opt {
+				margin: 0 0 0 12px;
+				padding: 2px 0;
+				column-gap: 12px;
+				background: none;
+			}
+			.${ROOT_CLASS}-panel .tps-opt:hover {
+				background: none;
+			}
+			.${ROOT_CLASS}-panel .tps-opt > .tps-opt-label,
+			.${ROOT_CLASS}-panel .tps-opt > input:checked ~ .tps-opt-label {
+				font-size: 13px;
+				font-weight: 500;
+				color: var(--tps-text);
+			}
+			/* Buttons: sized to their label, never wrapping, never stretched across a card. Quiet
+			   variant on the input surface with the strong border; the accent only on the primary. */
+			.${ROOT_CLASS}-panel .tps-button {
+				min-height: 32px;
+				padding: 0 14px;
+				font-size: 12.5px;
+				font-weight: 500;
+				white-space: nowrap;
+				width: auto;
+				justify-self: start;
+				align-self: center;
+				flex: 0 0 auto;
+			}
+			.${ROOT_CLASS}-panel .tps-button--ghost {
+				background: var(--tps-bg-input);
+				border: 1px solid var(--tps-border-strong);
+				color: var(--tps-text);
+			}
+			.${ROOT_CLASS}-panel .tps-button--ghost:hover {
+				background: var(--tps-bg-active);
+				border-color: var(--tps-text-faint);
+			}
+			.${ROOT_CLASS}-panel .tps-button--primary {
+				background: var(--tps-accent);
+				border: 1px solid var(--tps-accent);
+				color: var(--tps-on-accent);
+			}
+			.${ROOT_CLASS}-panel .tps-button--primary:hover {
+				background: var(--tps-accent-strong);
+				border-color: var(--tps-accent-strong);
+			}
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-coll-pick {
+				align-items: center;
+			}
+			/* Links: underlined at rest so they are findable, the underline lifts on hover and the
+			   color deepens \u2014 one rule for every link in the panel. */
+			.${ROOT_CLASS}-panel a,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field-hint a,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-steps a {
+				color: var(--tps-accent);
+				text-decoration: underline;
+				text-decoration-color: color-mix(in srgb, var(--tps-accent) 40%, transparent);
+				text-decoration-thickness: 1px;
+				text-underline-offset: 3px;
+				transition: color var(--tps-dur-fast, 80ms) var(--tps-ease-out, ease);
+			}
+			.${ROOT_CLASS}-panel a:hover,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-field-hint a:hover,
+			.${ROOT_CLASS}-panel .${ROOT_CLASS}-steps a:hover {
+				text-decoration: none;
+				color: var(--tps-accent-strong);
+			}
+			.${ROOT_CLASS}-panel a:focus-visible {
+				outline: 2px solid var(--tps-accent);
+				outline-offset: 2px;
+				border-radius: 2px;
 			}
 		`;
     }
