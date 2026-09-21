@@ -5633,7 +5633,11 @@ class Plugin extends CollectionPlugin {
     const custom = conf && typeof conf === "object" && conf.custom && typeof conf.custom === "object" ? conf.custom : {};
     const prefs = custom[prefsKey] && typeof custom[prefsKey] === "object" ? custom[prefsKey] : null;
     const slots = custom[secretsKey] && typeof custom[secretsKey] === "object" ? custom[secretsKey] : null;
-    const secrets = userGuid && slots && slots[userGuid] && typeof slots[userGuid] === "object" ? slots[userGuid] : null;
+    let secrets = userGuid && slots && slots[userGuid] && typeof slots[userGuid] === "object" ? slots[userGuid] : null;
+    if (!secrets && slots) {
+      const keys = Object.keys(slots).filter((k) => slots[k] && typeof slots[k] === "object");
+      if (keys.length === 1) secrets = slots[keys[0]];
+    }
     const mapping = {};
     for (const key of EXPORT_MAPPING_KEYS) mapping[key] = String(settings && settings[key] || "");
     return {
@@ -5649,19 +5653,20 @@ class Plugin extends CollectionPlugin {
     };
   }
   __name(buildSettingsExport, "buildSettingsExport");
-  function settingsFromLegacyBag(bag) {
+  function settingsFromLegacyBag(bag, deviceKey = "") {
     if (!bag || typeof bag !== "object") return {};
-    if (bag.shared && typeof bag.shared === "object") {
-      const devices = bag.byDevice && typeof bag.byDevice === "object" ? Object.values(bag.byDevice) : [];
-      const first = devices.find((slot) => slot && typeof slot === "object") || {};
-      return { ...first, ...bag.shared };
-    }
-    return { ...bag };
+    const isMap = bag.shared && typeof bag.shared === "object" || bag.byDevice && typeof bag.byDevice === "object";
+    if (!isMap) return { ...bag };
+    const shared = bag.shared && typeof bag.shared === "object" ? bag.shared : {};
+    const slots = bag.byDevice && typeof bag.byDevice === "object" ? bag.byDevice : {};
+    const mine = deviceKey && slots[deviceKey] && typeof slots[deviceKey] === "object" ? slots[deviceKey] : null;
+    const first = mine || Object.values(slots).find((slot) => slot && typeof slot === "object") || {};
+    return { ...shared, ...first };
   }
   __name(settingsFromLegacyBag, "settingsFromLegacyBag");
-  function buildLegacyCollectionExport({ conf, userGuid, version, collectionGuid }) {
+  function buildLegacyCollectionExport({ conf, userGuid, version, collectionGuid, deviceKey = "" }) {
     const custom = conf && typeof conf === "object" && conf.custom && typeof conf.custom === "object" ? conf.custom : {};
-    return buildSettingsExport({ conf, userGuid, version, collectionGuid, settings: settingsFromLegacyBag(custom.recallAi) });
+    return buildSettingsExport({ conf, userGuid, version, collectionGuid, settings: settingsFromLegacyBag(custom.recallAi, deviceKey) });
   }
   __name(buildLegacyCollectionExport, "buildLegacyCollectionExport");
   function parseSettingsImport(text) {
@@ -5788,7 +5793,7 @@ class Plugin extends CollectionPlugin {
   __name(injectTooltipCss, "injectTooltipCss");
 
   // plugin.js
-  var PLUGIN_VERSION = "2.0.17";
+  var PLUGIN_VERSION = "2.0.18";
   var DEV_TOOLS = true;
   var MIN_BRIDGE_VERSION = "1.22.1";
   var REQUIRED_BRIDGE_CAPABILITIES = Object.freeze([
@@ -10458,6 +10463,14 @@ ${recovered}`;
         h("span", { class: `${ROOT_CLASS}-field-hint` }, "Reads that collection\u2019s stored settings. It is not modified.")
       );
     }
+    /** The settings store's stable per-device id, so a 1.x device slot can be matched to this device. */
+    _deviceKey() {
+      try {
+        return String(localStorage.getItem("tps-settings-device-id") || "");
+      } catch {
+        return "";
+      }
+    }
     /** @param {string} collectionGuid */
     async _importFromLegacyCollection(collectionGuid) {
       const api = this._collectionByGuid(collectionGuid);
@@ -10469,7 +10482,7 @@ ${recovered}`;
         conf = null;
       }
       if (!conf || !conf.custom || !conf.custom[CONFIG_KEY]) return this._toast("Could not import", "That collection carries no Meetings settings.");
-      const imported = buildLegacyCollectionExport({ conf, userGuid: this._currentUserGuid(), version: PLUGIN_VERSION, collectionGuid });
+      const imported = buildLegacyCollectionExport({ conf, userGuid: this._currentUserGuid(), version: PLUGIN_VERSION, collectionGuid, deviceKey: this._deviceKey() });
       try {
         let workspace = "";
         try {
@@ -10503,7 +10516,7 @@ ${recovered}`;
       }));
       if (!ok) return this._toast("Could not import", "Thymer did not hand over a writable config handle.");
       try {
-        this._settingsStore.recover(settingsFromLegacyBag(imported.prefs));
+        this._settingsStore.recover(settingsFromLegacyBag(imported.prefs, this._deviceKey()));
       } catch {
       }
       if (imported.secrets) {
